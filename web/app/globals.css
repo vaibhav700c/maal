@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+@theme {
+  --color-paper: #fafbfc;
+  --color-panel: #ffffff;
+  --color-ink: #1a1d21;
+  --color-ink2: #5c6470;
+  --color-line: #e3e7eb;
+  --color-accent: #e8590c;
+  --color-ok: #2f9e44;
+  --color-warn: #e8930c;
+  --color-bad: #e03131;
+}
+
+:root {
+  font-variant-numeric: tabular-nums;
+}
