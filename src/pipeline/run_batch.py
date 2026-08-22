@@ -113,6 +113,8 @@ def build_output_row(
         (extraction.brand if extraction else None)
         or _brand_display(row)
     )
+    if brand and extraction and extraction.brand and "\u00ae" not in brand:
+        brand = f"{brand}\u00ae"  # house style: resolved brands carry the mark
     manufacturer = (
         (extraction.manufacturer if extraction else None)
         or row.mfr_name

@@ -12,11 +12,15 @@ from pipeline.models import (
 )
 
 SYSTEM = (
-    "You are a precise industrial catalog data extractor. Extract facts ONLY "
-    "from the raw description and the supplied source snippets. NEVER invent "
-    "values. Every attribute you output MUST carry a short verbatim 'quote' "
-    "copied exactly from the description or one of the snippets. If a fact is "
-    "not present, omit it. Output STRICT JSON only."
+    "You are a precise industrial catalog data extractor. Attribute values "
+    "come ONLY from the raw description and supplied source snippets — never "
+    "invent measurements. ONE exception: the brand may be inferred from the "
+    "product's model/part number using your knowledge of manufacturer coding "
+    "schemes (e.g. PDSH4816AF -> Frigidaire, WDTS7024RZ -> Whirlpool, "
+    "49-94-0063 -> Milwaukee); only infer when confident. Every other "
+    "attribute MUST carry a short verbatim 'quote' copied exactly from the "
+    "description or one of the snippets; omit facts not present. Output "
+    "STRICT JSON only."
 )
 
 PROMPT_TEMPLATE = """Extract structured product data.
@@ -31,7 +35,8 @@ SOURCE SNIPPETS (manufacturer-owned pages):
 Output STRICT JSON:
 {{"item_type": "short product type noun",
   "series": "series name or null",
-  "brand": "brand printed on the product (e.g. '3M', 'Diablo', 'Leviton') or null — NOT the distributor",
+  "brand": "brand printed on the product OR confidently inferred from the model number (e.g. '3M', 'Diablo', 'Leviton', 'Frigidaire') or null — NOT the distributor",
+  "brand_inferred": true if brand came from model-number knowledge rather than text, else false,
   "manufacturer": "actual product manufacturer you are confident about, else null",
   "attributes": [{{"label": "...", "value": "...", "uom": "approved abbrev or null", "quote": "verbatim source text"}}],
   "features": ["short feature phrase", ...],
@@ -154,6 +159,7 @@ def _parse_extraction(
         series=data.get("series") or None,
         brand=(str(data["brand"]).strip() if data.get("brand") else None),
         manufacturer=(str(data["manufacturer"]).strip() if data.get("manufacturer") else None),
+        brand_inferred=bool(data.get("brand_inferred")),
         features=[str(f) for f in (data.get("features") or [])][:20],
         certifications=[str(c) for c in (data.get("certifications") or [])],
         application=data.get("application") or None,
@@ -165,6 +171,23 @@ def _parse_extraction(
     for pre in pre_extract_attributes(row.part_desc):
         if pre.label.lower() not in merged:
             extraction.attributes.append(pre)
+    if extraction.brand and "brand" not in merged and "brand name" not in merged:
+        inferred = bool(getattr(extraction, "brand_inferred", False))
+        extraction.attributes.insert(0, Attribute(
+            label="Brand Name",
+            value=extraction.brand,
+            evidence=Evidence(
+                quote=(
+                    f"inferred from model number {row.mfg_part_num}"
+                    if inferred
+                    else row.part_desc[:200]
+                ),
+                url=None,
+                tier=0.5 if inferred else 0.0,
+            ),
+            verdict="UNVERIFIED" if inferred else "UNVERIFIED",
+            review_reason=None if not inferred else "brand inferred from manufacturer model-code knowledge",
+        ))
     return extraction
 
 

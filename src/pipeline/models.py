@@ -45,6 +45,7 @@ class Extraction(BaseModel):
     item_type: str
     series: str | None = None
     brand: str | None = None          # brand as printed on the product (e.g. 3M)
+    brand_inferred: bool = False      # True when brand came from model-code knowledge
     manufacturer: str | None = None   # actual manufacturer, may differ from supplier
     attributes: list[Attribute] = Field(default_factory=list)
     features: list[str] = Field(default_factory=list)

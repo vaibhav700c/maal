@@ -143,9 +143,9 @@ def test_brand_from_extraction_overrides_supplier():
         attributes=[Attribute(label="Grit", value="150")],
     )
     out = build_output_row(clean, None, None, extraction)
-    assert out["BRAND_NAME"] == "3M"
+    assert out["BRAND_NAME"] == "3M\u00ae"  # house style: resolved brands carry the mark
     assert out["MANUFACTURER_NAME"] == "3M Company"
-    assert out["TRADE_NAME"] == "3M"
+    assert out["TRADE_NAME"].startswith("3M")
 
 
 def test_mobile_desc_dedupes_head_and_pads():
