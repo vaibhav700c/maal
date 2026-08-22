@@ -86,6 +86,22 @@ PYTHONPATH=src:. .venv/bin/python eval/score.py output/result.csv
 PYTHONPATH=src:. .venv/bin/python eval/rescore.py
 ```
 
+## Web portal (run from the browser)
+
+```bash
+cd web && npm install && npm run build && npm start   # http://localhost:3000
+```
+
+1. **Dashboard** — recent enrichment runs and entry points
+2. **Enrich** — submit a single product (part number + description) or upload a
+   `.csv`/`.xlsx`/`.tsv`; column names are auto-detected (`SKU`, `Description`,
+   `Vendor`, etc. all map to the pipeline format)
+3. **Job page** — live progress while rows enrich; when done, expand each record
+   to inspect provenance per attribute and download `result.csv` / `result.xlsx`
+   / `sidecar.jsonl` for exactly what you uploaded
+4. **Catalog** — browse/review the full sample-dataset run, correct values,
+   download outputs
+
 ## Review console
 
 ```bash
