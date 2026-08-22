@@ -96,3 +96,24 @@ async def test_extract_attaches_snippet_evidence_and_merges_preextracted():
     assert by_label["Max RPM"].verdict == "UNSUPPORTED"
     assert "Arbor" in by_label  # merged from pre-extraction
     assert out.item_type == "Cut Off Disc"
+
+
+async def test_extract_many_positional_fallback_without_index():
+    from pipeline.extract import extract_many
+
+    class PosLLM:
+        async def generate_json(self, prompt, system=None):
+            # model omitted "index" entirely -> positional mapping must apply
+            return [
+                {"item_type": "Cut Off Disc", "attributes": [
+                    {"label": "Diameter", "value": "14", "uom": "in", "quote": "14 inch"}]},
+                {"item_type": "Sanding Belt", "attributes": []},
+            ]
+
+    rows = [
+        (CleanRow(mfg_part_num="R0", part_desc='R0 Disc 14"x1/8"x1"'), None, None),
+        (CleanRow(mfg_part_num="R1", part_desc="R1 Belt 1/2x18"), None, None),
+    ]
+    out = await extract_many(PosLLM(), rows, batch=8)
+    assert [e.item_type for e in out] == ["Cut Off Disc", "Sanding Belt"]
+    assert out[0].attributes[0].value == "14"

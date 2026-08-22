@@ -126,7 +126,7 @@ def _row_section(index: int, row: CleanRow, classification, retrieval) -> str:
     )
 
 
-MULTI_PROMPT_HEADER = """Extract structured product data for EACH numbered row INDEPENDENTLY. Do not mix facts between rows. Every attribute MUST carry a verbatim 'quote' from that row's description or its own snippets; omit facts not present.
+MULTI_PROMPT_HEADER = """Extract structured product data for EACH numbered row INDEPENDENTLY. Do not mix facts between rows. Every attribute MUST carry a verbatim 'quote' from that row's description or its own snippets; omit facts not present. Every output object MUST set "index" to the ROW number exactly as shown (0-based).
 
 """ + PROMPT_TEMPLATE.split("Extract structured product data.\n", 1)[1]
 
@@ -245,12 +245,14 @@ async def extract_many(
             data = []  # malformed model output -> deterministic fallbacks
         arr = data if isinstance(data, list) else (data.get("rows") if isinstance(data, dict) else None) or []
         by_index: dict[int, dict] = {}
-        for entry in arr:
-            if isinstance(entry, dict) and "index" in entry:
-                try:
-                    by_index[int(entry["index"])] = entry
-                except (TypeError, ValueError):
-                    continue
+        for position, entry in enumerate(arr):
+            if not isinstance(entry, dict):
+                continue
+            idx_value = entry.get("index", entry.get("row", position))
+            try:
+                by_index[int(idx_value)] = entry
+            except (TypeError, ValueError):
+                continue
         for local_i, (row, _cls, ret) in enumerate(chunk):
             parsed = by_index.get(local_i)
             if parsed and isinstance(parsed, dict) and parsed.get("item_type"):
