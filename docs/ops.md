@@ -34,13 +34,20 @@ tail -f output/batch.log
 The runner is checkpoint/resume-safe: interrupt anytime and rerun the same
 command; completed rows are skipped.
 
-### Quota reality (free tier)
-- Free tier allows ~20 requests/day/model for flagship flash models.
-- The client fails over across `GEMINI_MODEL_FALLBACKS` when a model's daily
-  budget is exhausted (see `.env`). With N usable models you get roughly
-  N x 20 requests/day -> ~10-15 rows/day per model chain on free tier.
-- For a same-day full run, enable billing on the AI Studio key (~$0.30-0.60
-  per 1M input tokens; full run costs roughly $2-5) and raise `RPM_LIMIT`.
+### Free-tier operation (current mode)
+- Batched pipeline: ~8 rows share one extract call; audit calls only for
+  rows with retrieved manufacturer evidence; classification batched 20/call.
+- Observed throughput: ~40 rows/minute while quota holds -> a full 1,000-row
+  catalog typically completes in under an hour when budgets allow.
+- When every model in `GEMINI_MODEL_FALLBACKS` exhausts its daily budget the
+  runner stops cleanly; completed rows stay checkpointed in `output/state.jsonl`.
+- Auto-resume is installed via launchd (`deploy/com.maal.pipeline.plist`,
+  loaded into `~/Library/LaunchAgents`): runs daily at 07:00 and picks up
+  where it stopped until the catalog is complete.
+- Manual controls:
+    launchctl list | grep maal          # installed?
+    launchctl kickstart -k gui/$UID/com.maal.pipeline   # run now
+    launchctl unload ~/Library/LaunchAgents/com.maal.pipeline.plist  # disable
 
 ## Human corrections loop
 
