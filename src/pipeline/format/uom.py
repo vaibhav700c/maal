@@ -60,8 +60,10 @@ def decimal_to_fraction(value: float, denom: int = 64, tol: float = 0.0101) -> s
         whole += 1
     if abs(nearest / denom - rem) > tol:
         return None
-    g = math.gcd(nearest, denom) if nearest else 1
+    g = math.gcd(nearest, denom) if nearest else denom
     num, den = nearest // g, denom // g
+    if num == 0:
+        return f"{sign}{whole}"
     if den == 1:
         return f"{sign}{whole + num}"
     prefix = f"{whole}-" if whole else ""
