@@ -178,6 +178,7 @@ def finalize_row(
         return result
     result.retrieval = retrieval
     result.extraction = extraction
+    result.classification = classification
     report = run_physics(extraction)
     result.physics = report
     apply_scores(extraction)
