@@ -1,6 +1,7 @@
 """Structured attribute extraction with mandatory evidence quotes."""
 import re
 
+from pipeline.llm import LLMError
 from pipeline.models import (
     Attribute,
     Classification,
@@ -104,24 +105,37 @@ def _match_evidence(quote: str | None, retrieval: RetrievalResult | None) -> Evi
     return None
 
 
-async def extract(
-    llm,
+def _pre_block(desc: str) -> str:
+    pres = pre_extract_attributes(desc)
+    return (
+        "\n".join(
+            f'- {a.label}: {a.value}{" " + a.uom if a.uom else ""}' for a in pres
+        )
+        or "(none)"
+    )
+
+
+def _row_section(index: int, row: CleanRow, classification, retrieval) -> str:
+    return (
+        f"=== ROW {index} ===\n"
+        f"RAW DESCRIPTION: {row.part_desc}\n"
+        f"MANUFACTURER: {row.mfr_name or 'unknown'}\n"
+        f"CLASSPATH: {classification.classpath if classification else 'unclassified'}\n"
+        f"SOURCE SNIPPETS:\n{_snippets_block(retrieval)}\n"
+        f"PRE-EXTRACTED (confirm, correct, or extend):\n{_pre_block(row.part_desc)}"
+    )
+
+
+MULTI_PROMPT_HEADER = """Extract structured product data for EACH numbered row INDEPENDENTLY. Do not mix facts between rows. Every attribute MUST carry a verbatim 'quote' from that row's description or its own snippets; omit facts not present.
+
+""" + PROMPT_TEMPLATE.split("Extract structured product data.\n", 1)[1]
+
+
+def _parse_extraction(
+    data: dict,
     row: CleanRow,
-    classification: Classification | None,
     retrieval: RetrievalResult | None,
 ) -> Extraction:
-    pres = pre_extract_attributes(row.part_desc)
-    pre_block = "\n".join(
-        f'- {a.label}: {a.value}{" " + a.uom if a.uom else ""}' for a in pres
-    ) or "(none)"
-    prompt = PROMPT_TEMPLATE.format(
-        desc=row.part_desc,
-        mfr=row.mfr_name or "unknown",
-        classpath=classification.classpath if classification else "unclassified",
-        snippets=_snippets_block(retrieval),
-        pre=pre_block,
-    )
-    data = await llm.generate_json(prompt, SYSTEM)
     extraction = Extraction(
         item_type=str(data.get("item_type") or "Product"),
         series=data.get("series") or None,
@@ -133,6 +147,15 @@ async def extract(
         includes=data.get("includes") or None,
         additional=data.get("additional") or None,
     )
+    _fill_attributes(extraction, data, row, retrieval)
+    merged = {a.label.lower(): a for a in extraction.attributes}
+    for pre in pre_extract_attributes(row.part_desc):
+        if pre.label.lower() not in merged:
+            extraction.attributes.append(pre)
+    return extraction
+
+
+def _fill_attributes(extraction, data, row, retrieval):
     seen_labels = set()
     for item in data.get("attributes") or []:
         if not isinstance(item, dict):
@@ -173,8 +196,70 @@ async def extract(
                 evidence=attr_evidence,
             )
         )
-    merged = {a.label.lower(): a for a in extraction.attributes}
-    for pre in pres:
-        if pre.label.lower() not in merged:
-            extraction.attributes.append(pre)
-    return extraction
+
+
+async def extract(
+    llm,
+    row: CleanRow,
+    classification: Classification | None,
+    retrieval: RetrievalResult | None,
+) -> Extraction:
+    """Single-row convenience wrapper (one LLM call)."""
+    prompt = (
+        "Extract structured product data.\n"
+        + PROMPT_TEMPLATE.format(
+            desc=row.part_desc,
+            mfr=row.mfr_name or "unknown",
+            classpath=classification.classpath if classification else "unclassified",
+            snippets=_snippets_block(retrieval),
+            pre=_pre_block(row.part_desc),
+        ).split("\n", 1)[1]
+    )
+    data = await llm.generate_json(prompt, SYSTEM)
+    return _parse_extraction(data, row, retrieval)
+
+
+def _chunk(items, size):
+    for i in range(0, len(items), size):
+        yield i, items[i : i + size]
+
+
+async def extract_many(
+    llm,
+    items: list[tuple[CleanRow, Classification | None, RetrievalResult | None]],
+    batch: int = 8,
+) -> list[Extraction]:
+    """Batched extraction: ~batch rows share one LLM call."""
+    results: list[Extraction | None] = [None] * len(items)
+    for start, chunk in _chunk(items, batch):
+        sections = "\n\n".join(
+            _row_section(i, row, cls, ret)
+            for i, (row, cls, ret) in enumerate(chunk)
+        )
+        prompt = MULTI_PROMPT_HEADER + "\nROWS:\n\n" + sections
+        try:
+            data = await llm.generate_json(prompt, SYSTEM)
+        except LLMError as exc:
+            if "invalid JSON" not in str(exc):
+                raise  # quota/network problems must surface, not degrade quality
+            data = []  # malformed model output -> deterministic fallbacks
+        arr = data if isinstance(data, list) else (data.get("rows") if isinstance(data, dict) else None) or []
+        by_index: dict[int, dict] = {}
+        for entry in arr:
+            if isinstance(entry, dict) and "index" in entry:
+                try:
+                    by_index[int(entry["index"])] = entry
+                except (TypeError, ValueError):
+                    continue
+        for local_i, (row, _cls, ret) in enumerate(chunk):
+            parsed = by_index.get(local_i)
+            if parsed and isinstance(parsed, dict) and parsed.get("item_type"):
+                results[start + local_i] = _parse_extraction(parsed, row, ret)
+            else:
+                # model skipped the row -> deterministic input-only fallback
+                fallback = Extraction(item_type="Product")
+                _fill_attributes(fallback, {"attributes": []}, row, ret)
+                for pre in pre_extract_attributes(row.part_desc):
+                    fallback.attributes.append(pre)
+                results[start + local_i] = fallback
+    return [r for r in results if r is not None]

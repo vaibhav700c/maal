@@ -32,7 +32,13 @@ async def test_verify_applies_all_three_verdicts():
     extraction = _extraction()
     retrieval = RetrievalResult(
         domain="freud.com",
-        snippets=[],
+        snippets=[
+            __import__("pipeline.models", fromlist=["Evidence"]).Evidence(
+                quote="14 inch diameter with 1 inch arbor, aluminum oxide disc",
+                url="https://freud.com/p/x",
+                tier=1.0,
+            )
+        ],
     )
     response = [
         {"index": 0, "verdict": "CONFIRMED", "reason": "matches source"},

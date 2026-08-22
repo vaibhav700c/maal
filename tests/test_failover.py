@@ -60,3 +60,21 @@ async def test_client_fails_over_on_daily_quota(monkeypatch):
 async def test_stub_backend_path_unchanged():
     client = LLMClient(backend=StubBackend(responses=['{"x": 2}']))
     assert (await client.generate_json("p")) == {"x": 2}
+
+
+async def test_extract_many_reraises_quota_errors():
+    from pipeline.extract import extract_many
+    from pipeline.models import CleanRow
+
+    from pipeline.llm import LLMError
+
+    class DeadLLM:
+        async def generate_json(self, prompt, system=None):
+            raise LLMError("all models failed -> daily quota")
+
+    rows = [CleanRow(mfg_part_num="X1", part_desc="disc")]
+    try:
+        await extract_many(DeadLLM(), [(rows[0], None, None)], batch=8)
+        raise SystemExit("should have raised")
+    except Exception as exc:
+        assert "all models failed" in str(exc)

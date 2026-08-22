@@ -1,4 +1,10 @@
-"""Batch orchestration: staged enrichment with checkpoints and corrections."""
+"""Batch orchestration: staged enrichment with checkpoints and corrections.
+
+Free-tier strategy: rows are processed in chunks sharing one batched extract
+call and one batched audit call; rows without retrieved evidence skip the
+audit entirely. On daily-quota exhaustion the runner stops cleanly so a
+rerun resumes where it left off.
+"""
 import argparse
 import asyncio
 import csv
@@ -10,7 +16,7 @@ from pipeline.classify import classify_rows
 from pipeline.cleanse import cleanse_row
 from pipeline.config import Settings
 from pipeline.confidence import apply_scores, mark_duplicates, triage_score
-from pipeline.extract import extract
+from pipeline.extract import extract_many
 from pipeline.format.descriptions import (
     DescInput,
     build_invoice_desc,
@@ -20,11 +26,17 @@ from pipeline.format.descriptions import (
     build_short_desc,
 )
 from pipeline.format.emit import write_outputs
-from pipeline.llm import LLMClient
-from pipeline.models import Attribute, CleanRow, RowResult
+from pipeline.llm import LLMClient, LLMError
+from pipeline.models import (
+    Attribute,
+    CleanRow,
+    Extraction,
+    RetrievalResult,
+    RowResult,
+)
 from pipeline.physics import run_physics
 from pipeline.retrieve import load_cache, retrieve_for_row, save_cache
-from pipeline.verify_adversarial import verify
+from pipeline.verify_adversarial import verify_many
 
 STATE_PATH_DEFAULT = Path("output/state.jsonl")
 CORRECTIONS_PATH = Path("output/corrections.jsonl")
@@ -88,8 +100,7 @@ def apply_corrections(result: RowResult, corrections: dict[str, dict]) -> None:
 
 
 def _brand_display(row: CleanRow) -> str | None:
-    brand = row.dib_brand or row.unilog_brand or row.e1_brand or row.mfr_name
-    return brand
+    return row.dib_brand or row.unilog_brand or row.e1_brand or row.mfr_name
 
 
 def build_output_row(
@@ -98,16 +109,6 @@ def build_output_row(
     retrieval,
     extraction,
 ) -> dict[str, str]:
-    view = DescInput(
-        brand_display=_brand_display(row),
-        manuf_name=row.mfr_name,
-        mpn=row.mfg_part_num,
-        item_type=extraction.item_type if extraction else "Product",
-        series=extraction.series if extraction else None,
-        feature=(extraction.features[0] if extraction and extraction.features else None),
-        attributes=extraction.attributes if extraction else [],
-        additional=extraction.additional if extraction else None,
-    )
     brand = (
         (extraction.brand if extraction else None)
         or _brand_display(row)
@@ -116,6 +117,16 @@ def build_output_row(
         (extraction.manufacturer if extraction else None)
         or row.mfr_name
         or ""
+    )
+    view = DescInput(
+        brand_display=brand or manufacturer or None,
+        manuf_name=manufacturer or None,
+        mpn=row.mfg_part_num,
+        item_type=extraction.item_type if extraction else "Product",
+        series=extraction.series if extraction else None,
+        feature=(extraction.features[0] if extraction and extraction.features else None),
+        attributes=extraction.attributes if extraction else [],
+        additional=extraction.additional if extraction else None,
     )
     out: dict[str, str] = {
         "MANUFACTURER_NAME": manufacturer,
@@ -153,24 +164,19 @@ def build_output_row(
     return {k: v for k, v in out.items() if v != ""}
 
 
-async def process_row(
+def finalize_row(
     row: CleanRow,
-    llm,
     classification,
-    retrieval_cache: dict,
-    http=None,
-    ddgs_fn=None,
-    corrections: dict[str, dict] | None = None,
+    retrieval: RetrievalResult | None,
+    extraction: Extraction | None,
+    corrections: dict[str, dict],
+    error: str | None = None,
 ) -> RowResult:
     result = RowResult(mfg_part_num=row.mfg_part_num, clean=row)
-    try:
-        retrieval = await retrieve_for_row(row, cache=retrieval_cache, http=http, ddgs_fn=ddgs_fn)
-        result.retrieval = retrieval
-        extraction = await extract(llm, row, classification, retrieval)
-        extraction = await verify(llm, extraction, retrieval)
-    except Exception as exc:  # noqa: BLE001 - one bad row must not kill the batch
-        result.flags.extend(["NEEDS_REVIEW", f"PIPELINE_ERROR:{type(exc).__name__}"])
+    if error is not None:
+        result.flags.extend(["NEEDS_REVIEW", f"PIPELINE_ERROR:{error}"])
         return result
+    result.retrieval = retrieval
     result.extraction = extraction
     report = run_physics(extraction)
     result.physics = report
@@ -178,22 +184,18 @@ async def process_row(
     if not report.ok:
         violated = sorted(report.violated_fields)
         for attr in extraction.attributes:
-            if attr.label in violated:
-                attr.review_reason = (
-                    attr.review_reason or f"physics check failed: "
-                    + "; ".join(c.reason or c.name for c in report.checks if attr.label in c.fields)
+            if attr.label in violated and not attr.review_reason:
+                attr.review_reason = "; ".join(
+                    c.reason or c.name for c in report.checks if attr.label in c.fields
                 )
-        result.flags.append("PHYSICS_VIOLATION")
-        result.flags.append("NEEDS_REVIEW")
+        result.flags.extend(["PHYSICS_VIOLATION", "NEEDS_REVIEW"])
     if classification is None:
         result.flags.append("NEEDS_REVIEW")
     result.output_row = build_output_row(row, classification, retrieval, extraction)
-    unsupported = [
-        a.label for a in extraction.attributes if a.verdict == "UNSUPPORTED"
-    ]
-    if len(unsupported) >= max(1, len(extraction.attributes)):
+    unsupported = [a for a in extraction.attributes if a.verdict == "UNSUPPORTED"]
+    if extraction.attributes and len(unsupported) >= len(extraction.attributes):
         result.flags.append("NEEDS_REVIEW")
-    apply_corrections(result, corrections or {})
+    apply_corrections(result, corrections)
     result.flags = list(dict.fromkeys(result.flags))
     result.triage_score = triage_score(result)
     return result
@@ -227,6 +229,16 @@ class Checkpoint:
         return [RowResult(**rec["row_result"]) for rec in self.done.values()]
 
 
+def _chunked(items, size):
+    for i in range(0, len(items), size):
+        yield items[i : i + size]
+
+
+def _is_quota_dead(exc: BaseException) -> bool:
+    text = str(exc)
+    return "all models failed" in text or isinstance(exc, LLMError) and "daily quota" in text.lower()
+
+
 async def run_batch(
     settings: Settings,
     limit: int | None = None,
@@ -235,7 +247,8 @@ async def run_batch(
     backend=None,
     http=None,
     ddgs_fn=None,
-    concurrency: int = 4,
+    concurrency: int = 6,
+    extraction_batch: int | None = None,
 ) -> list[RowResult]:
     rows = load_input(settings.input_csv, limit)
     checkpoint = Checkpoint(state_path, resume)
@@ -243,43 +256,79 @@ async def run_batch(
 
     retrieval_cache = load_cache()
     corrections = load_corrections()
+    batch_size = extraction_batch or int(__import__("os").environ.get("EXTRACT_BATCH", "8"))
 
-    if backend is None:
-        if not settings.api_key:
-            raise SystemExit("GEMINI_API_KEY missing; add it to .env")
+    if backend is None and not settings.api_key:
+        raise SystemExit("GEMINI_API_KEY missing; add it to .env")
     llm = LLMClient(settings, backend=backend)
 
     classifications: dict = {}
     if pending_rows:
         try:
             classifications = await classify_rows(llm, pending_rows)
-        except Exception as exc:  # noqa: BLE001 - degrade, don't die
+        except LLMError as exc:
+            if _is_quota_dead(exc):
+                print("daily quota exhausted before classification; rerun later",
+                      file=sys.stderr)
+                return checkpoint.results()
             print(f"classification failed ({exc}); continuing unclassified",
                   file=sys.stderr)
-            for row in pending_rows:
-                pass  # rows proceed without classpath; flagged at emit time
+        except Exception as exc:  # noqa: BLE001
+            print(f"classification failed ({exc}); continuing unclassified",
+                  file=sys.stderr)
 
-    semaphore = asyncio.Semaphore(concurrency)
-    counter = {"n": 0}
+    done_count = 0
+    quota_dead = False
+    for rows_chunk in _chunked(pending_rows, batch_size):
+        # 1) retrieval — pure HTTP, fully concurrent, never fatal
+        outcomes = await asyncio.gather(
+            *(
+                retrieve_for_row(r, cache=retrieval_cache, http=http, ddgs_fn=ddgs_fn)
+                for r in rows_chunk
+            ),
+            return_exceptions=True,
+        )
+        retrievals: list[RetrievalResult | None] = []
+        for r, outcome in zip(rows_chunk, outcomes):
+            retrievals.append(outcome if isinstance(outcome, RetrievalResult) else None)
 
-    async def worker(row: CleanRow) -> RowResult:
-        async with semaphore:
-            result = await process_row(
-                row,
+        # 2) batched extraction — one call per chunk
+        try:
+            extractions = await extract_many(
                 llm,
-                classifications.get(row.mfg_part_num),
-                retrieval_cache,
-                http=http,
-                ddgs_fn=ddgs_fn,
-                corrections=corrections,
+                [
+                    (r, classifications.get(r.mfg_part_num), ret)
+                    for r, ret in zip(rows_chunk, retrievals)
+                ],
+                batch=batch_size,
             )
-            checkpoint.append(result)
-            counter["n"] += 1
-            print(f"[{counter['n']}/{len(pending_rows)}] {row.mfg_part_num} "
-                  f"flags={result.flags}", file=sys.stderr)
-            return result
+        except LLMError as exc:
+            if _is_quota_dead(exc):
+                quota_dead = True
+                break
+            raise
 
-    fresh = await asyncio.gather(*(worker(r) for r in pending_rows))
+        # 3) batched adversarial audit — only rows with evidence consume calls
+        try:
+            extractions = await verify_many(
+                llm, list(zip(extractions, retrievals)), batch=batch_size
+            )
+        except LLMError as exc:
+            if _is_quota_dead(exc):
+                quota_dead = True
+                break
+            raise
+
+        # 4) deterministic finalize + checkpoint
+        for row, ret, ext in zip(rows_chunk, retrievals, extractions):
+            error = None if ret is not None else "RETRIEVAL_FAILED"
+            result = finalize_row(row, classifications.get(row.mfg_part_num), ret, ext,
+                                  corrections, error=error)
+            checkpoint.append(result)
+            done_count += 1
+            print(f"[{done_count}/{len(pending_rows)}] {row.mfg_part_num} "
+                  f"flags={result.flags}", file=sys.stderr)
+
     save_cache(retrieval_cache)
 
     all_results = checkpoint.results()
@@ -290,6 +339,10 @@ async def run_batch(
         r.triage_score = triage_score(r)
     all_results.sort(key=lambda r: -r.triage_score)
     write_outputs(all_results, settings.output_dir)
+    if quota_dead:
+        remaining = len(pending_rows) - sum(1 for r in pending_rows if checkpoint.has(r.mfg_part_num))
+        print(f"daily quota exhausted; ~{max(0, remaining)} rows remain — "
+              "rerun tomorrow or after billing is enabled", file=sys.stderr)
     return all_results
 
 
