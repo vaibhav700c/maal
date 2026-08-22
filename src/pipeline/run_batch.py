@@ -353,11 +353,44 @@ async def run_batch(
     return all_results
 
 
+async def classify_backfill(settings: Settings, state_path: Path, backend=None) -> None:
+    """Re-run classification ONLY for checkpointed rows missing a classpath."""
+    checkpoint = Checkpoint(state_path, resume=True)
+    targets = [
+        r.clean for r in checkpoint.results()
+        if r.classification is None or not r.classification.classpath
+    ]
+    if not targets:
+        print("all rows already classified", file=sys.stderr)
+        return
+    llm = LLMClient(settings, backend=backend)
+    fresh = await classify_rows(llm, targets)
+    # rewrite state with patched classifications
+    lines_out = []
+    for line in state_path.read_text().splitlines():
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        mpn = rec.get("mfg_part_num")
+        cls = fresh.get(mpn)
+        if cls is not None:
+            rec["row_result"]["classification"] = cls.model_dump()
+            flags = [f for f in rec["row_result"].get("flags", [])]
+            lines_out.append(json.dumps(rec, ensure_ascii=False))
+        else:
+            lines_out.append(line)
+    state_path.write_text("\n".join(lines_out) + "\n")
+    print(f"classified {len(fresh)}/{len(targets)} rows", file=sys.stderr)
+
+
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description="Maal enrichment pipeline")
     parser.add_argument("--input", default=None, help="override input CSV path")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--no-resume", action="store_true")
+    parser.add_argument("--classify-only", action="store_true",
+                        help="backfill missing classifications in checkpoints, no extraction")
     parser.add_argument("--state", default=str(STATE_PATH_DEFAULT))
     args = parser.parse_args(argv)
 
@@ -365,6 +398,11 @@ def main(argv=None) -> None:
     if args.input:
         settings.input_csv = Path(args.input)
     state_path = Path(args.state)
+
+    if args.classify_only:
+        asyncio.run(classify_backfill(settings, state_path, backend=None))
+        return
+
     results = asyncio.run(
         run_batch(
             settings,
