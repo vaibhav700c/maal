@@ -351,9 +351,9 @@ async def run_batch(
 
     save_cache(retrieval_cache)
 
-    all_results = checkpoint.results()
-    keep = {r.mfg_part_num for r in rows}
-    all_results = [r for r in all_results if r.mfg_part_num in keep]
+    # rebuild from the FULL checkpoint file so a top-up run never erases
+    # previously enriched rows from the shared artifacts
+    all_results = Checkpoint(state_path, resume=True).results()
     mark_duplicates(all_results)
     for r in all_results:
         r.triage_score = triage_score(r)

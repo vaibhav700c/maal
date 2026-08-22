@@ -158,3 +158,42 @@ def test_mobile_desc_dedupes_head_and_pads():
     )
     out = build_mobile_desc(view)
     assert "Acme Acme" not in out
+
+
+async def test_topup_run_preserves_full_catalog_artifacts(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    write_input(tmp_path, [("A1", 'A1 Disc 14"x1" Metal'), ("B2", "B2 Sander M12")])
+    state = tmp_path / "state.jsonl"
+
+    async def fake_retrieve(row, cache=None, http=None, ddgs_fn=None):
+        return RetrievalResult(flags=["NO_MFR_DOMAIN"])
+
+    monkeypatch.setattr(rb, "retrieve_for_row", fake_retrieve)
+    responses = [[{"index": i, "classpath": "T>A>C", "unspsc": None} for i in range(2)]]
+    for _ in range(2):
+        responses.append({"item_type": "Disc", "attributes": [
+            {"label": "Diameter", "value": "14", "uom": "in", "quote": "q"}]})
+        responses.append([])
+    await rb.run_batch(settings, limit=2, resume=False, state_path=state,
+                       backend=StubBackend(responses), http=object())
+
+    # second run adds one NEW row; artifact must contain 1 + 2 = 3 rows
+    write_input_rows = [("C3", "C3 Disc 7in")]
+    with open(settings.input_csv, "w") as f:
+        import csv as _csv
+        w = _csv.writer(f)
+        w.writerow(["Mfg_Part_Num", "Part_Desc", "E1_Brand", "Unilog_Brand", "DIB_Brand", "Part_Manuf"])
+        for mpn, desc in write_input_rows:
+            w.writerow([mpn, desc, "-- Unbranded --", "-- No Unilog Brand --", "-- No DIB Brand --", "Freud Inc"])
+
+    responses2 = [[{"index": 0, "classpath": "T>A>C", "unspsc": None}]]
+    responses2.append({"item_type": "Disc", "attributes": []})
+    responses2.append([])
+    await rb.run_batch(settings, limit=1, resume=False, state_path=state,
+                       backend=StubBackend(responses2), http=object())
+
+    import csv as _csv
+    with open(settings.output_dir / "result.csv", newline="") as f:
+        body = list(_csv.reader(f))[1:]
+    assert len(body) == 3  # A1 + B2 from history + C3 new
