@@ -4,6 +4,8 @@ import path from "node:path";
 export const OUTPUT_DIR =
   process.env.MAAL_OUTPUT_DIR ?? path.join(process.cwd(), "..", "output");
 
+export const PROJECT_ROOT = process.env.MAAL_ROOT ?? path.join(process.cwd(), "..");
+
 export type SidecarField = {
   value: string | null;
   uom?: string | null;

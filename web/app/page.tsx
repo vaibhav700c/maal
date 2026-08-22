@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { listRows } from "@/lib/artifacts";
 import { Chip, flagTone, physicsSummary, TriageMeter } from "@/components/ui";
+import RunPanel from "@/components/run-panel";
 
 const FILTERS = [
   { key: "all", label: "All rows" },
@@ -47,6 +48,9 @@ export default async function QueuePage({
 
   return (
     <section>
+      <div className="pb-4">
+        <RunPanel />
+      </div>
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pb-4">
         <h1 className="font-sans text-sm font-semibold uppercase tracking-[0.14em] text-ink2">
           Review queue
