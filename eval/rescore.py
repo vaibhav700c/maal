@@ -33,7 +33,9 @@ def rescore(state_path: Path = STATE) -> int:
             leaf = classpath.split(">")[-1].strip() if classpath else ""
             extraction.item_type = leaf.rstrip("s") or "Product"
             rec["row_result"]["extraction"]["item_type"] = extraction.item_type
-        failed_model = extraction is None or not extraction.attributes
+        failed_model = extraction is None or (
+            not extraction.attributes and extraction.item_type in ("Product", "")
+        )
         unclassified = not classpath
         errored = any(f.startswith("PIPELINE_ERROR") for f in flags)
         if (failed_model or unclassified or errored) and "NEEDS_REVIEW" not in flags:

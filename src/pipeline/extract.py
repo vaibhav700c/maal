@@ -73,7 +73,7 @@ def pre_extract_attributes(desc: str) -> list[Attribute]:
             )
         )
 
-    desc = re.sub(r"(\d+(?:\.\d+)?(?:-\d+/\d+)?)\s*(?:ft|')\b", r"\1 ft", desc)
+    desc = re.sub(r"(\d+(?:\.\d+)?(?:-\d+/\d+)?)\s*(?:ft|')(?=\s|$)", r"\1 ft ", desc)
     dims = _DIM_RE.findall(desc)
     if len(dims) >= 3:
         add("Diameter", dims[0], "in")

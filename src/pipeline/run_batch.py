@@ -291,7 +291,10 @@ async def run_batch(
         )
         retrievals: list[RetrievalResult | None] = []
         for r, outcome in zip(rows_chunk, outcomes):
-            retrievals.append(outcome if isinstance(outcome, RetrievalResult) else None)
+            if isinstance(outcome, RetrievalResult):
+                retrievals.append(outcome)
+            else:
+                retrievals.append(RetrievalResult(flags=["NO_MFR_DOMAIN"]))
 
         # 2) batched extraction — one call per chunk
         try:

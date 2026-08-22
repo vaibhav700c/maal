@@ -37,7 +37,14 @@ def row_checks(row: dict) -> dict[str, str | bool]:
     long_desc = (row.get("LONG_DESC1") or "").strip()
     short_desc = (row.get("SHORT_DESC") or "").strip()
     if long_desc:
-        glued = [m.group(0) for m in UOM_GLUED_RE.finditer(long_desc)]
+        mpn = (row.get("MANUFACTURER_PART_NUMBER") or "").strip()
+        scan_text = long_desc
+        if mpn:
+            # part numbers legitimately embed digit-letter runs; remove both
+            # dashed and compact forms before scanning for glued units
+            scan_text = scan_text.replace(mpn, " ")
+            scan_text = scan_text.replace(mpn.replace("-", ""), " ")
+        glued = [m.group(0) for m in UOM_GLUED_RE.finditer(scan_text)]
         out["long_uom_spacing"] = not glued
     if short_desc:
         out["short_populated_with_mpn_like_token"] = bool(short_desc)
