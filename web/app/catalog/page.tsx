@@ -1,87 +1,143 @@
 import Link from "next/link";
-import { listJobs } from "@/lib/jobs";
+import { listRows } from "@/lib/artifacts";
+import { Chip, flagTone, physicsSummary, TriageMeter } from "@/components/ui";
+import RunPanel from "@/components/run-panel";
 
-const STATUS_TONE: Record<string, string> = {
-  RUNNING: "text-accent",
-  DONE: "text-ok",
-  FAILED: "text-bad",
-  CANCELLED: "text-ink2",
-};
+const FILTERS = [
+  { key: "all", label: "All rows" },
+  { key: "review", label: "Needs review", match: (f: string[]) => f.includes("NEEDS_REVIEW") },
+  { key: "physics", label: "Physics failed", match: (f: string[]) => f.includes("PHYSICS_VIOLATION") },
+  { key: "dupes", label: "Duplicate suspects", match: (f: string[]) => f.includes("DUPLICATE_SUSPECT") },
+] as const;
 
-export default function HomePage() {
-  const jobs = listJobs().slice(0, 6);
+export default async function CatalogPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ filter?: string }>;
+}) {
+  const { filter = "all" } = await searchParams;
+  const rows = listRows();
+
+  if (!rows.length) {
+    return (
+      <div className="mx-auto max-w-xl border border-line bg-panel p-8">
+        <h1 className="font-sans text-base font-semibold">No enriched rows yet</h1>
+        <p className="mt-2 text-sm text-ink2">
+          Run the pipeline to populate the catalog — use the panel below or the CLI:
+        </p>
+        <pre className="mt-3 overflow-x-auto rounded-[3px] border border-line bg-paper p-3 font-mono text-xs">
+          PYTHONPATH=src .venv/bin/python -m pipeline.run_batch --limit 10
+        </pre>
+        <div className="mt-4">
+          <RunPanel />
+        </div>
+      </div>
+    );
+  }
+
+  const counts = FILTERS.map((f) => ({
+    ...f,
+    count:
+      "match" in f ? rows.filter((r) => f.match(r.flags)).length : rows.length,
+  }));
+  const active = FILTERS.find((f) => f.key === filter) ?? FILTERS[0];
+  const visible =
+    active.key === "all"
+      ? rows
+      : rows.filter((r) =>
+          "match" in active ? active.match(r.flags) : true
+        );
 
   return (
-    <section className="mx-auto max-w-3xl">
-      <div className="border-b border-line pb-8">
-        <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-ink2">
-          Industrial product intelligence
-        </p>
-        <h1 className="mt-2 max-w-xl font-sans text-2xl font-bold leading-tight">
-          Turn raw part listings into verified, commerce-ready records.
+    <section>
+      <div className="pb-4">
+        <RunPanel />
+      </div>
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pb-4">
+        <h1 className="font-sans text-sm font-semibold uppercase tracking-[0.14em] text-ink2">
+          Catalog review queue
         </h1>
-        <p className="mt-3 max-w-xl text-sm leading-relaxed text-ink2">
-          Every value arrives with its source document, an adversarial audit
-          verdict, and a physics check. Nothing is invented — anything the
-          pipeline cannot prove is flagged for review instead.
-        </p>
-        <div className="mt-5 flex gap-3">
-          <Link
-            href="/enrich"
-            className="rounded-[3px] bg-accent px-4 py-2 font-mono text-xs font-semibold text-white hover:bg-accent/90"
-          >
-            Enrich products
-          </Link>
-          <Link
-            href="/catalog"
-            className="rounded-[3px] border border-line bg-panel px-4 py-2 font-mono text-xs font-semibold hover:border-ink"
-          >
-            Browse catalog
-          </Link>
-        </div>
+        <nav className="flex flex-wrap items-center gap-2">
+          {counts.map((f) => {
+            const isActive = f.key === active.key;
+            return (
+              <Link
+                key={f.key}
+                href={f.key === "all" ? "/catalog" : `/catalog?filter=${f.key}`}
+                className={`rounded-[3px] border px-2.5 py-1 font-mono text-[11px] ${
+                  isActive
+                    ? "border-accent/50 bg-accent/10 text-accent"
+                    : "border-line bg-panel text-ink2 hover:border-ink2 hover:text-ink"
+                }`}
+              >
+                {f.label} · {f.count}
+              </Link>
+            );
+          })}
+        </nav>
       </div>
 
-      <div className="pt-6">
-        <div className="flex items-center justify-between">
-          <h2 className="font-mono text-[10px] uppercase tracking-wider text-ink2">
-            Recent enrichment runs
-          </h2>
-          <Link href="/enrich" className="font-mono text-xs text-accent underline decoration-accent/40 underline-offset-4 hover:decoration-accent">
-            + new run
-          </Link>
-        </div>
-        {jobs.length === 0 ? (
-          <p className="mt-3 rounded-[3px] border border-line bg-panel p-5 text-sm text-ink2">
-            No runs yet. Send one product or a spreadsheet from{" "}
-            <Link href="/enrich" className="underline underline-offset-4">
-              Enrich products
-            </Link>{" "}
-            and it will appear here with its results.
-          </p>
-        ) : (
-          <ul className="mt-3 flex flex-col gap-2">
-            {jobs.map((job) => (
-              <li key={job.id}>
-                <Link
-                  href={`/jobs/${job.id}`}
-                  className="flex items-center justify-between gap-4 rounded-[3px] border border-line bg-panel px-4 py-3 hover:border-ink"
+      <div className="overflow-hidden rounded-[3px] border border-line bg-panel">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-line font-mono text-[10px] uppercase tracking-wider text-ink2">
+              <th className="w-10 px-3 py-2 font-medium" aria-label="triage" />
+              <th className="px-3 py-2 font-medium">Part number</th>
+              <th className="px-3 py-2 font-medium">Classpath</th>
+              <th className="px-3 py-2 font-medium">Physics</th>
+              <th className="w-28 px-3 py-2 font-medium">Confidence</th>
+              <th className="px-3 py-2 font-medium">Flags</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((row) => {
+              const phys = physicsSummary(row);
+              return (
+                <tr
+                  key={row.mpn}
+                  className="border-b border-line last:border-b-0 hover:bg-paper"
                 >
-                  <div className="min-w-0">
-                    <span className="block truncate font-mono text-sm">{job.name}</span>
-                    <span className="font-mono text-[10px] uppercase tracking-wide text-ink2">
-                      {new Date(job.createdAt).toLocaleString()} · {job.inputRows} row
-                      {job.inputRows === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                  <span className={`shrink-0 font-mono text-xs font-semibold ${STATUS_TONE[job.status] ?? ""}`}>
-                    {job.status}
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
+                  <td className="px-3 py-2 align-middle">
+                    <div className="flex justify-center">
+                      <TriageMeter score={row.triage} />
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    <Link
+                      href={`/row/${encodeURIComponent(row.mpn)}`}
+                      className="font-mono text-[13px] underline decoration-line underline-offset-4 hover:decoration-accent hover:text-accent"
+                    >
+                      {row.mpn}
+                    </Link>
+                  </td>
+                  <td className="max-w-md truncate px-3 py-2 text-ink2">
+                    {row.classpath || "— unclassified —"}
+                  </td>
+                  <td className="px-3 py-2">
+                    <Chip tone={phys.tone}>{phys.label}</Chip>
+                  </td>
+                  <td className="px-3 py-2 font-mono text-[13px]">
+                    {row.meanConfidence.toFixed(2)}
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap gap-1">
+                      {row.flags.length === 0 && <Chip tone="ok">CLEAN</Chip>}
+                      {row.flags.map((flag) => (
+                        <Chip key={flag} tone={flagTone(flag)}>
+                          {flag.replace(/_/g, " ")}
+                        </Chip>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
+      <p className="pt-3 font-mono text-[11px] text-ink2">
+        Sorted by triage score — highest review risk first. Downloads in the header.
+      </p>
     </section>
   );
 }
