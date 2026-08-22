@@ -33,7 +33,7 @@ export default function RootLayout({
       <body className="min-h-screen bg-paper font-sans text-ink antialiased">
         <header className="border-b border-line bg-panel">
           <div className="flex items-center justify-between px-6 py-3">
-            <Link href="/" className="flex items-baseline gap-3">
+            <Link href="/about" className="flex items-baseline gap-3" title="What is Maal?">
               <span className="font-sans text-lg font-bold tracking-[0.18em]">
                 MAAL
               </span>
@@ -53,6 +53,9 @@ export default function RootLayout({
               </Link>
               <Link href="/compare" className="font-mono text-xs text-ink2 underline decoration-line underline-offset-4 hover:text-ink">
                 Ground truth
+              </Link>
+              <Link href="/about" className="font-mono text-xs text-ink2 underline decoration-line underline-offset-4 hover:text-ink">
+                About
               </Link>
             </nav>
           </div>
