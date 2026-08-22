@@ -51,6 +51,9 @@ export default function RootLayout({
               <Link href="/catalog" className="font-mono text-xs text-ink2 underline decoration-line underline-offset-4 hover:text-ink">
                 Catalog
               </Link>
+              <Link href="/compare" className="font-mono text-xs text-ink2 underline decoration-line underline-offset-4 hover:text-ink">
+                Ground truth
+              </Link>
             </nav>
           </div>
         </header>
