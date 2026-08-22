@@ -12,23 +12,24 @@ const ALLOWLIST: Record<string, string> = {
   "sidecar.jsonl": "application/x-ndjson; charset=utf-8",
 };
 
-export async function GET(
-  _request: Request,
-  context: { params: Promise<{ file: string }> }
-) {
-  const { file } = await context.params;
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const jobId = searchParams.get("job");
+  const file = searchParams.get("file") ?? "result.csv";
   const contentType = ALLOWLIST[file];
   if (!contentType) {
     return NextResponse.json({ error: "Unknown artifact" }, { status: 404 });
   }
-  const filePath = path.join(OUTPUT_DIR, path.basename(file));
+  const baseDir = jobId ? path.join(OUTPUT_DIR, "jobs", jobId) : OUTPUT_DIR;
+  const filePath = path.join(baseDir, path.basename(file));
   if (!fs.existsSync(filePath)) {
     return NextResponse.json({ error: "Artifact not generated yet" }, { status: 404 });
   }
+  const name = jobId ? `${jobId}-${file}` : file;
   return new NextResponse(fs.readFileSync(filePath), {
     headers: {
       "Content-Type": contentType,
-      "Content-Disposition": `attachment; filename="${file}"`,
+      "Content-Disposition": `attachment; filename="${name}"`,
     },
   });
 }

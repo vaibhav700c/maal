@@ -179,6 +179,14 @@ def finalize_row(
     result.retrieval = retrieval
     result.extraction = extraction
     result.classification = classification
+    if extraction.item_type in ("Product", "") and classification:
+        leaf = classification.classpath.split(">")[-1].strip()
+        extraction.item_type = leaf.rstrip("s") or extraction.item_type or "Product"
+        if not extraction.attributes:
+            extraction.attributes.append(
+                Attribute(label="Product Type", value=extraction.item_type,
+                          verdict="UNVERIFIED")
+            )
     report = run_physics(extraction)
     result.physics = report
     apply_scores(extraction)
@@ -395,11 +403,15 @@ def main(argv=None) -> None:
     parser.add_argument("--classify-only", action="store_true",
                         help="backfill missing classifications in checkpoints, no extraction")
     parser.add_argument("--state", default=str(STATE_PATH_DEFAULT))
+    parser.add_argument("--out-dir", default=None,
+                        help="write artifacts here instead of the shared output dir")
     args = parser.parse_args(argv)
 
     settings = Settings.from_env()
     if args.input:
         settings.input_csv = Path(args.input)
+    if args.out_dir:
+        settings.output_dir = Path(args.out_dir)
     state_path = Path(args.state)
 
     if args.classify_only:

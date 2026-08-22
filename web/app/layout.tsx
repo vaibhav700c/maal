@@ -42,15 +42,15 @@ export default function RootLayout({
               </span>
             </Link>
             <nav className="flex items-center gap-5">
-              {downloads.map((d) => (
-                <a
-                  key={d.label}
-                  href={d.href}
-                  className="font-mono text-xs text-ink2 underline decoration-line underline-offset-4 hover:text-ink hover:decoration-ink"
-                >
-                  {d.label}
-                </a>
-              ))}
+              <Link href="/enrich" className="rounded-[3px] bg-accent px-3 py-1.5 font-mono text-xs font-semibold text-white hover:bg-accent/90">
+                Enrich
+              </Link>
+              <Link href="/" className="font-mono text-xs text-ink2 underline decoration-line underline-offset-4 hover:text-ink">
+                Dashboard
+              </Link>
+              <Link href="/catalog" className="font-mono text-xs text-ink2 underline decoration-line underline-offset-4 hover:text-ink">
+                Catalog
+              </Link>
             </nav>
           </div>
         </header>
