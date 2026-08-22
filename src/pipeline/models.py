@@ -44,6 +44,8 @@ class Classification(BaseModel):
 class Extraction(BaseModel):
     item_type: str
     series: str | None = None
+    brand: str | None = None          # brand as printed on the product (e.g. 3M)
+    manufacturer: str | None = None   # actual manufacturer, may differ from supplier
     attributes: list[Attribute] = Field(default_factory=list)
     features: list[str] = Field(default_factory=list)
     certifications: list[str] = Field(default_factory=list)

@@ -30,6 +30,8 @@ SOURCE SNIPPETS (manufacturer-owned pages):
 Output STRICT JSON:
 {{"item_type": "short product type noun",
   "series": "series name or null",
+  "brand": "brand printed on the product (e.g. '3M', 'Diablo', 'Leviton') or null — NOT the distributor",
+  "manufacturer": "actual product manufacturer you are confident about, else null",
   "attributes": [{{"label": "...", "value": "...", "uom": "approved abbrev or null", "quote": "verbatim source text"}}],
   "features": ["short feature phrase", ...],
   "certifications": ["UL Listed", ...],
@@ -123,6 +125,8 @@ async def extract(
     extraction = Extraction(
         item_type=str(data.get("item_type") or "Product"),
         series=data.get("series") or None,
+        brand=(str(data["brand"]).strip() if data.get("brand") else None),
+        manufacturer=(str(data["manufacturer"]).strip() if data.get("manufacturer") else None),
         features=[str(f) for f in (data.get("features") or [])][:20],
         certifications=[str(c) for c in (data.get("certifications") or [])],
         application=data.get("application") or None,

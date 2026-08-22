@@ -108,10 +108,19 @@ def build_output_row(
         attributes=extraction.attributes if extraction else [],
         additional=extraction.additional if extraction else None,
     )
+    brand = (
+        (extraction.brand if extraction else None)
+        or _brand_display(row)
+    )
+    manufacturer = (
+        (extraction.manufacturer if extraction else None)
+        or row.mfr_name
+        or ""
+    )
     out: dict[str, str] = {
-        "MANUFACTURER_NAME": row.mfr_name or "",
-        "BRAND_NAME": _brand_display(row) or "",
-        "TRADE_NAME": (_brand_display(row) or "") if _brand_display(row) != row.mfr_name else "",
+        "MANUFACTURER_NAME": manufacturer,
+        "BRAND_NAME": brand or "",
+        "TRADE_NAME": brand if brand and extraction and extraction.brand else "",
         "MANUFACTURER_PART_NUMBER": row.mfg_part_num,
         "Classpath": classification.classpath if classification else "",
         "UNSPSC": (classification.unspsc or "") if classification else "",

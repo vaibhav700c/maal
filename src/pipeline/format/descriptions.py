@@ -57,8 +57,16 @@ def _brand(d: DescInput) -> str | None:
 
 def build_mobile_desc(d: DescInput) -> str:
     """'{Manuf} {Brand}, {Type}, {Series}, {MPN}' per ground truth."""
-    head = " ".join(p for p in [d.manuf_name, _brand(d)] if p)
-    return _join([head, d.item_type, d.series, d.mpn])
+    head_parts: list[str] = []
+    for part in [d.manuf_name, _brand(d)]:
+        if part and part not in head_parts:
+            head_parts.append(part)
+    head = " ".join(head_parts)
+    out = _join([head, d.item_type, d.series, d.mpn])
+    if len(out) < MOBILE_MIN and d.attributes:
+        extra = ", ".join(_attr_text(a) for a in d.attributes[:3])
+        out = f"{out}, {extra}"
+    return out
 
 
 def build_short_desc(d: DescInput) -> str:

@@ -9,6 +9,22 @@ class LLMError(Exception):
     pass
 
 
+class DailyQuotaError(Exception):
+    """Raised when the provider's per-day request budget is exhausted."""
+
+
+def classify_llm_error(exc: Exception) -> str:
+    text = str(exc).lower()
+    compact = text.replace("_", "")
+    if "perday" in compact or "requestsperday" in compact or "per-day" in text:
+        return "daily"
+    if "retry in" in text and ("day" in text or "hour" in text):
+        return "daily"
+    if "429" in str(exc) or "resource_exhausted" in text or "quota" in text:
+        return "rate"
+    return "other"
+
+
 class RateLimiter:
     def __init__(self, rpm: int):
         self.min_interval = 60.0 / max(rpm, 1)
@@ -29,8 +45,10 @@ async def retry_429(fn, attempts: int = 6):
         try:
             return await fn()
         except Exception as exc:  # noqa: BLE001
-            msg = str(exc).lower()
-            if "429" in str(exc) or "resource_exhausted" in msg or "quota" in msg:
+            kind = classify_llm_error(exc)
+            if kind == "daily":
+                raise DailyQuotaError(str(exc)) from exc
+            if kind == "rate":
                 last_exc = exc
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 60.0)
@@ -98,10 +116,30 @@ class LLMClient:
         self._settings = settings
         self.backend = backend or GeminiBackend(settings.api_key, settings.model)
         self.limiter = RateLimiter(settings.rpm)
+        self._injected_backend = backend is not None
+
+    def _backend_for(self, model: str):
+        if self._injected_backend:
+            return self.backend
+        return GeminiBackend(self._settings.api_key, model)
 
     async def generate(self, prompt: str, system: str | None = None) -> str:
-        await self.limiter.acquire()
-        return await retry_429(lambda: self.backend.complete(prompt, system))
+        if self._injected_backend:
+            await self.limiter.acquire()
+            return await retry_429(
+                lambda: self._backend_for(self._settings.model).complete(prompt, system)
+            )
+        models = [self._settings.model] + list(self._settings.model_fallbacks)
+        last_daily: DailyQuotaError | None = None
+        for model in models:
+            backend = self._backend_for(model)
+            try:
+                await self.limiter.acquire()
+                return await retry_429(lambda: backend.complete(prompt, system))
+            except DailyQuotaError as exc:
+                last_daily = exc
+                continue
+        raise LLMError(f"daily quota exhausted on all models: {last_daily}")
 
     async def generate_json(self, prompt: str, system: str | None = None):
         text = await self.generate(prompt, system)
