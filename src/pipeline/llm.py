@@ -105,6 +105,8 @@ class LLMClient:
 
     async def generate_json(self, prompt: str, system: str | None = None):
         text = await self.generate(prompt, system)
+        if isinstance(text, (dict, list)):  # stub backends may return parsed JSON
+            return text
         try:
             return parse_json_loose(text)
         except json.JSONDecodeError as exc:
