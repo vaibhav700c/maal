@@ -22,7 +22,11 @@ def _fraction_value(text: str) -> float | None:
     if not match:
         return None
     if match.group(1):
+        if not match.group(3) or int(match.group(3)) == 0:
+            return None
         return int(match.group(1)) + int(match.group(2)) / int(match.group(3))
+    if not match.group(5) or int(match.group(5)) == 0:
+        return None
     return int(match.group(4)) / int(match.group(5))
 
 

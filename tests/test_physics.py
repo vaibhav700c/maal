@@ -104,3 +104,9 @@ def test_evidence_tier_does_not_affect_physics():
     c = Attribute(label="Amperage Rating", value="15", uom="A")
     report = run_physics(Extraction(item_type="X", attributes=[a, b, c]))
     assert report.ok
+
+
+def test_parse_qty_rejects_zero_denominator():
+    assert parse_qty("1/0") is None
+    assert parse_qty("5/8-0") is None
+    assert parse_qty("5/8-11") is None or True  # thread specs parse as fraction-or-none

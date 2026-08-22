@@ -322,8 +322,14 @@ async def run_batch(
         # 4) deterministic finalize + checkpoint
         for row, ret, ext in zip(rows_chunk, retrievals, extractions):
             error = None if ret is not None else "RETRIEVAL_FAILED"
-            result = finalize_row(row, classifications.get(row.mfg_part_num), ret, ext,
-                                  corrections, error=error)
+            try:
+                result = finalize_row(row, classifications.get(row.mfg_part_num), ret,
+                                      ext, corrections, error=error)
+            except Exception as exc:  # noqa: BLE001 - one bad row never kills a batch
+                result = finalize_row(row, classifications.get(row.mfg_part_num),
+                                      ret, None, corrections,
+                                      error=f"{type(exc).__name__}")
+                result.flags.append("NEEDS_REVIEW")
             checkpoint.append(result)
             done_count += 1
             print(f"[{done_count}/{len(pending_rows)}] {row.mfg_part_num} "
