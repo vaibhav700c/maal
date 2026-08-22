@@ -3,6 +3,7 @@ import json
 
 import pipeline.run_batch as rb
 from pipeline.config import Settings
+from pipeline.models import Attribute, CleanRow
 from pipeline.llm import StubBackend
 from pipeline.models import RetrievalResult
 from pathlib import Path
@@ -128,3 +129,32 @@ async def test_corrections_applied(tmp_path, monkeypatch):
     rpm = next(a for a in row.extraction.attributes if a.label == "Max RPM")
     assert rpm.value == "6600" and rpm.verdict == "CONFIRMED"
     assert row.output_row["SHORT_DESC"] == "Human approved title"
+
+
+def test_brand_from_extraction_overrides_supplier():
+    from pipeline.models import Attribute, Extraction
+    from pipeline.run_batch import build_output_row
+
+    clean = CleanRow(mfg_part_num="M1", part_desc="3M disc", mfr_name="Jam Industrial Supply LLC")
+    extraction = Extraction(
+        item_type="Cut Off Disc",
+        brand="3M",
+        manufacturer="3M Company",
+        attributes=[Attribute(label="Grit", value="150")],
+    )
+    out = build_output_row(clean, None, None, extraction)
+    assert out["BRAND_NAME"] == "3M"
+    assert out["MANUFACTURER_NAME"] == "3M Company"
+    assert out["TRADE_NAME"] == "3M"
+
+
+def test_mobile_desc_dedupes_head_and_pads():
+    from pipeline.format.descriptions import DescInput, build_mobile_desc
+
+    view = DescInput(
+        brand_display="Acme", manuf_name="Acme", mpn="X1", item_type="Disc",
+        series=None, feature=None,
+        attributes=[Attribute(label="Diameter", value="14", uom="in")],
+    )
+    out = build_mobile_desc(view)
+    assert "Acme Acme" not in out

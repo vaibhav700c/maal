@@ -185,6 +185,8 @@ async def process_row(
                 )
         result.flags.append("PHYSICS_VIOLATION")
         result.flags.append("NEEDS_REVIEW")
+    if classification is None:
+        result.flags.append("NEEDS_REVIEW")
     result.output_row = build_output_row(row, classification, retrieval, extraction)
     unsupported = [
         a.label for a in extraction.attributes if a.verdict == "UNSUPPORTED"
@@ -192,6 +194,7 @@ async def process_row(
     if len(unsupported) >= max(1, len(extraction.attributes)):
         result.flags.append("NEEDS_REVIEW")
     apply_corrections(result, corrections or {})
+    result.flags = list(dict.fromkeys(result.flags))
     result.triage_score = triage_score(result)
     return result
 
@@ -246,7 +249,15 @@ async def run_batch(
             raise SystemExit("GEMINI_API_KEY missing; add it to .env")
     llm = LLMClient(settings, backend=backend)
 
-    classifications = await classify_rows(llm, pending_rows) if pending_rows else {}
+    classifications: dict = {}
+    if pending_rows:
+        try:
+            classifications = await classify_rows(llm, pending_rows)
+        except Exception as exc:  # noqa: BLE001 - degrade, don't die
+            print(f"classification failed ({exc}); continuing unclassified",
+                  file=sys.stderr)
+            for row in pending_rows:
+                pass  # rows proceed without classpath; flagged at emit time
 
     semaphore = asyncio.Semaphore(concurrency)
     counter = {"n": 0}

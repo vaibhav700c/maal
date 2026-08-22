@@ -20,7 +20,17 @@ def classify_llm_error(exc: Exception) -> str:
         return "daily"
     if "retry in" in text and ("day" in text or "hour" in text):
         return "daily"
-    if "429" in str(exc) or "resource_exhausted" in text or "quota" in text:
+    if (
+        "429" in str(exc)
+        or "resource_exhausted" in text
+        or "quota" in text
+        or "503" in str(exc)
+        or "unavailable" in text
+        or "high demand" in text
+        or "500" in str(exc)
+        or "internal error" in text
+        or "deadline" in text
+    ):
         return "rate"
     return "other"
 
@@ -130,16 +140,19 @@ class LLMClient:
                 lambda: self._backend_for(self._settings.model).complete(prompt, system)
             )
         models = [self._settings.model] + list(self._settings.model_fallbacks)
-        last_daily: DailyQuotaError | None = None
+        errors: list[str] = []
         for model in models:
             backend = self._backend_for(model)
             try:
                 await self.limiter.acquire()
                 return await retry_429(lambda: backend.complete(prompt, system))
             except DailyQuotaError as exc:
-                last_daily = exc
+                errors.append(f"{model}: daily quota")
                 continue
-        raise LLMError(f"daily quota exhausted on all models: {last_daily}")
+            except LLMError as exc:
+                errors.append(f"{model}: {exc}")
+                continue
+        raise LLMError("all models failed -> " + " | ".join(errors))
 
     async def generate_json(self, prompt: str, system: str | None = None):
         text = await self.generate(prompt, system)
