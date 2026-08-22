@@ -1,4 +1,5 @@
 """Deterministic description builders — no LLM generation, templates only."""
+import re
 from dataclasses import dataclass
 
 from pipeline.models import Attribute
@@ -21,11 +22,12 @@ class DescInput:
 
 
 def _attr_text(attr: Attribute) -> str:
-    if attr.uom and attr.value and attr.value[-1].isdigit():
-        return f"{attr.value} {attr.uom}"
+    value = attr.value or ""
+    # verbatim quotes sometimes carry a bare inch mark: 30 " -> 30 in
+    value = re.sub(r'(\d)\s*"', r"\1 in", value)
     if attr.uom:
-        return f"{attr.value} {attr.uom}"
-    return attr.value
+        return f"{value} {attr.uom}".strip()
+    return value
 
 
 def _join(parts: list[str | None]) -> str:

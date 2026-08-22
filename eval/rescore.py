@@ -27,12 +27,14 @@ def rescore(state_path: Path = STATE) -> int:
         row = RowResult(**rec["row_result"])
         flags = [f for f in row.flags if f != "NEEDS_REVIEW"]
         extraction = row.extraction
-        failed_model = (
-            extraction is None
-            or not extraction.attributes
-            or extraction.item_type == "Product"
-        )
-        unclassified = row.classification is None or not row.classification.classpath
+        classpath = row.classification.classpath if row.classification else ""
+        if extraction is not None and extraction.item_type in ("Product", ""):
+            # derive an honest item type from the taxonomy leaf
+            leaf = classpath.split(">")[-1].strip() if classpath else ""
+            extraction.item_type = leaf.rstrip("s") or "Product"
+            rec["row_result"]["extraction"]["item_type"] = extraction.item_type
+        failed_model = extraction is None or not extraction.attributes
+        unclassified = not classpath
         errored = any(f.startswith("PIPELINE_ERROR") for f in flags)
         if (failed_model or unclassified or errored) and "NEEDS_REVIEW" not in flags:
             flags.append("NEEDS_REVIEW")

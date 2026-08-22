@@ -117,3 +117,14 @@ async def test_extract_many_positional_fallback_without_index():
     out = await extract_many(PosLLM(), rows, batch=8)
     assert [e.item_type for e in out] == ["Cut Off Disc", "Sanding Belt"]
     assert out[0].attributes[0].value == "14"
+
+
+def test_pre_extract_ignores_mpn_and_feet_marks():
+    # MPN ending in digits+A must not become amperage
+    attrs = pre_extract_attributes("37418A 15A GFCI Outlet White")
+    got = {a.label: a.value for a in attrs}
+    assert got.get("Amperage Rating") == "15"
+    # foot-marked length captured as Length/ft, not an arbor
+    attrs2 = pre_extract_attributes("543143912 1x12-12' Jasper Trex Board")
+    labels = [a.label for a in attrs2]
+    assert "Length" in labels

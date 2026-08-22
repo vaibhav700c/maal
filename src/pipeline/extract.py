@@ -50,8 +50,18 @@ _WATT_RE = re.compile(r"\b(\d+(?:\.\d+)?)\s?W\b")
 _GRIT_RE = re.compile(r"\bP(\d{2,4})\b")
 
 
+def _strip_mpn(desc: str) -> str:
+    """Remove the leading part-number token so MPNs like '37418A' or
+    '49-94-0063' never masquerade as electrical specs."""
+    parts = desc.split(" ", 1)
+    if len(parts) == 2 and len(parts[0]) >= 4 and any(ch.isdigit() for ch in parts[0]):
+        return parts[1]
+    return desc
+
+
 def pre_extract_attributes(desc: str) -> list[Attribute]:
     attrs: list[Attribute] = []
+    desc = _strip_mpn(desc)
 
     def add(label: str, value: str, uom: str | None):
         attrs.append(
@@ -63,6 +73,7 @@ def pre_extract_attributes(desc: str) -> list[Attribute]:
             )
         )
 
+    desc = re.sub(r"(\d+(?:\.\d+)?(?:-\d+/\d+)?)\s*(?:ft|')\b", r"\1 ft", desc)
     dims = _DIM_RE.findall(desc)
     if len(dims) >= 3:
         add("Diameter", dims[0], "in")
@@ -71,6 +82,8 @@ def pre_extract_attributes(desc: str) -> list[Attribute]:
     elif len(dims) == 2:
         add("Diameter", dims[0], "in")
         add("Arbor", dims[1], "in")
+    for m in re.finditer(r"(\d+(?:\.\d+)?)\s+ft\b", desc):
+        add("Length", m.group(1), "ft")
     if m := _VOLT_RE.search(desc):
         add("Voltage Rating", m.group(1), "V")
     if m := _AMP_RE.search(desc):
