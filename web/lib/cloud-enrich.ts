@@ -299,6 +299,24 @@ function registeredHost(url: string, domain: string): boolean {
   }
 }
 
+/** Jina Search (free): far more reliable from datacenter IPs than HTML scrapes. */
+async function jinaSearch(query: string): Promise<string[]> {
+  const t = withTimeout(12000);
+  try {
+    const res = await fetch(`https://s.jina.ai/${encodeURIComponent(query)}`, {
+      headers: { "User-Agent": UA },
+      signal: t.signal,
+    });
+    t.done();
+    if (!res.ok) return [];
+    const body = await res.text();
+    const urls = [...body.matchAll(/https?:\/\/[^\s)"\\<>\]]+/g)].map((m) => m[0]);
+    return [...new Set(urls)];
+  } catch {
+    return [];
+  }
+}
+
 async function ddgsSearch(query: string): Promise<string[]> {
   const t = withTimeout(8000);
   const res = await fetch("https://html.duckduckgo.com/html/", {
@@ -394,15 +412,21 @@ async function retrieve(
   ret.mfr_url = `https://${domain}`;
 
   const urls: string[] = [];
-  for (let attempt = 0; attempt < 2 && urls.length === 0; attempt++) {
-    try {
-      const hits = await ddgsSearch(`site:${domain} ${mpn}`);
-      for (const h of hits) {
-        const pathOnly = h.split("?")[0];
-        if (pathOnly.toLowerCase().includes(mpn.toLowerCase()) && registeredHost(h, domain)) urls.push(h);
-      }
-    } catch { /* flaky */ }
-    if (!urls.length && attempt === 0) await new Promise((r) => setTimeout(r, 1500));
+  for (const engine of ["jina", "ddg"]) {
+    if (urls.length) break;
+    const hits =
+      engine === "jina"
+        ? await jinaSearch(`site:${domain} ${mpn}`)
+        : await ddgsSearch(`site:${domain} ${mpn}`);
+    for (const h of hits) {
+      const pathOnly = h.split("?")[0];
+      if (
+        pathOnly.toLowerCase().includes(mpn.toLowerCase()) &&
+        registeredHost(h, domain) &&
+        !urls.includes(h)
+      )
+        urls.push(h);
+    }
   }
 
   const candidateRefs: Array<[number, string]> = [];
