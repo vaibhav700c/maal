@@ -440,7 +440,7 @@ async def enrich_batch_file(file: bytes = File(...)) -> dict:
         desc = vals[i_desc].strip() if i_desc < len(vals) else ""
         if mpn or desc:
             rows_in.append(Product(mpn=mpn or desc[:24], description=desc))
-        if len(rows_in) >= 10:
+        if len(rows_in) >= 5:
             break
     if not rows_in:
         raise HTTPException(status_code=422, detail="No usable rows found")

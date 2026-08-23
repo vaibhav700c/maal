@@ -41,41 +41,97 @@ export default function EnrichPage() {
     URL.revokeObjectURL(a.href);
   }
 
+  const [progress, setProgress] = useState<string | null>(null);
+
   async function post(resPromise: Promise<Response>) {
     setBusy(true);
     setError(null);
-    setRows(null);
     try {
       const response = await resPromise;
       const body = await response.json().catch(() => ({}));
       if (!response.ok || !body.rows) {
         setError(body.error ?? `Something went wrong (${response.status}).`);
-        return;
+        return null;
       }
-      setRows(body.rows as JobResultRow[]);
-      setEchoes((body.echoes ?? []) as InputEcho[]);
-      setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }), 50);
+      return body;
     } catch {
       setError("Could not reach the server. Try again.");
-    } finally {
-      setBusy(false);
+      return null;
     }
   }
 
   async function submitSingle() {
-    await post(
+    setProgress("Enriching…");
+    const res = post(
       fetch("/api/enrich", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mpn, description, brand, supplier }),
       })
     );
+    const body = await res;
+    if (body?.rows) {
+      setRows(body.rows as JobResultRow[]);
+      setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }), 50);
+    }
+    setBusy(false); setProgress(null);
   }
 
   async function submitFile() {
-    const form = new FormData();
-    if (file) form.append("file", file);
-    await post(fetch("/api/enrich", { method: "POST", body: form }));
+    if (!file) { setBusy(false); return; }
+    setProgress("Reading file…");
+    const text = await file.text();
+    const lines = text.split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 2) { setError("File has no data rows."); setBusy(false); return; }
+
+    // Parse CSV
+    const parseLine = (line: string): string[] => {
+      const cells: string[] = []; let cur = ""; let q = false;
+      for (const ch of line) {
+        if (ch === '"') q = !q;
+        else if (ch === "," && !q) { cells.push(cur); cur = ""; }
+        else cur += ch;
+      }
+      cells.push(cur); return cells.map(c => c.trim());
+    };
+    const headers = parseLine(lines[0]).map(h => h.toLowerCase().trim());
+    const iMpn = headers.findIndex(h => ["mfg_part_num","mpn","part number","sku"].includes(h));
+    const iDesc = headers.findIndex(h => ["part_desc","description","desc","product description"].includes(h));
+    const iSup = headers.findIndex(h => ["part_manuf","manufacturer","supplier","vendor"].includes(h));
+    if (iMpn === -1 || iDesc === -1) { setError("Need part-number and description columns."); setBusy(false); return; }
+
+    // Build all data rows
+    const allRows: Array<{mpn:string;description:string;supplier?:string}> = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cells = parseLine(lines[i]);
+      const mpnVal = cells[iMpn]?.trim(); const descVal = cells[iDesc]?.trim();
+      if (mpnVal || descVal) allRows.push({ mpn: mpnVal || descVal.slice(0,24), description: descVal, supplier: iSup >= 0 ? cells[iSup]?.trim() : undefined });
+    }
+
+    if (!allRows.length) { setError("No usable rows found."); setBusy(false); return; }
+
+    // Chunk into groups of 3 and process sequentially
+    const CHUNK = 3;
+    const accumulated: JobResultRow[] = [];
+    for (let ci = 0; ci < allRows.length; ci += CHUNK) {
+      const chunk = allRows.slice(ci, ci + CHUNK);
+      setProgress(`Enriching rows ${ci + 1}–${Math.min(ci + CHUNK, allRows.length)} of ${allRows.length}…`);
+      const form = new FormData();
+      const csvText = ["Mfg_Part_Num,Part_Desc",
+        ...chunk.map(r => `"${r.mpn}","${r.description.replace(/"/g,'""')}","${r.supplier ?? ""}"`)
+      ].join("\n");
+      const blob = new Blob([csvText], { type: "text/csv" });
+      form.append("file", blob, "chunk.csv");
+      const res = await fetch("/api/enrich", { method: "POST", body: form });
+      const body = await res.json().catch(() => null);
+      if (body?.rows) {
+        accumulated.push(...(body.rows as JobResultRow[]));
+        setRows([...accumulated]);
+        setEchoes(prev => [...(prev ?? []), ...(body.echoes ?? [])]);
+      }
+    }
+    setProgress(null);
+    setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }), 50);
   }
 
   return (
@@ -203,6 +259,12 @@ export default function EnrichPage() {
         </Card>
       </div>
     
+      {progress && (
+        <p className="mt-3 rounded border border-accent/30 bg-accent/5 px-3 py-2 font-mono text-xs text-accent">
+          {progress}
+        </p>
+      )}
+
       {rows && rows.length > 0 && (
         <div className="mt-8 flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
