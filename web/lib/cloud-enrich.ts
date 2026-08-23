@@ -321,6 +321,30 @@ async function jinaSearch(query: string): Promise<string[]> {
   return urls;
 }
 
+/** Bing HTML results - historically tolerant of server-side fetchers. */
+async function bingSearch(query: string): Promise<string[]> {
+  const t = withTimeout(8000);
+  try {
+    const res = await fetch(
+      `https://www.bing.com/search?q=${encodeURIComponent(query)}&count=15`,
+      { headers: { "User-Agent": UA }, signal: t.signal }
+    );
+    t.done();
+    if (!res.ok) return [];
+    const html = await res.text();
+    const out: string[] = [];
+    for (const m of html.matchAll(/<li class="b_algo"[\s\S]*?<h2>\s*<a[^>]+href="(https?:\/\/[^"]+)"/gi)) {
+      out.push(m[1]);
+    }
+    if (!out.length) {
+      for (const m of html.matchAll(/<h2>\s*<a[^>]+href="(https?:\/\/[^"]+)"/gi)) out.push(m[1]);
+    }
+    return [...new Set(out)];
+  } catch {
+    return [];
+  }
+}
+
 async function ddgsSearch(query: string): Promise<string[]> {
   const t = withTimeout(8000);
   const res = await fetch("https://html.duckduckgo.com/html/", {
@@ -444,12 +468,14 @@ async function retrieve(
   ret.mfr_url = `https://${domain}`;
 
   const urls: string[] = [];
-  for (const engine of ["jina", "ddg"]) {
+  for (const engine of ["jina", "bing", "ddg"]) {
     if (urls.length) break;
     const hits =
       engine === "jina"
         ? await jinaSearch(`site:${domain} ${mpn}`)
-        : await ddgsSearch(`site:${domain} ${mpn}`);
+        : engine === "bing"
+          ? await bingSearch(`site:${domain} ${mpn}`)
+          : await ddgsSearch(`site:${domain} ${mpn}`);
     for (const h of hits) {
       const pathOnly = h.split("?")[0];
       if (
