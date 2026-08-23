@@ -112,6 +112,30 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
             upgraded.flags.append("BRAND_DOMAIN_LOOKUP")
             retrieval = upgraded
 
+    # deep document mining: product page + PDF manuals -> spec attributes
+    from backend.deep_mine import mine_documents
+
+    try:
+        mined_attrs, mined_features, mined_certs = await mine_documents(
+            llm(),
+            p.mpn,
+            retrieval.ref_urls if retrieval else [],
+            retrieval.product_url if retrieval else None,
+        )
+        existing = {a.label.lower() for a in extraction.attributes}
+        for attr in mined_attrs:
+            if attr.label.lower() not in existing:
+                extraction.attributes.append(attr)
+                existing.add(attr.label.lower())
+        for f in mined_features:
+            if f not in extraction.features:
+                extraction.features.append(f)
+        for c in mined_certs:
+            if c not in extraction.certifications:
+                extraction.certifications.append(c)
+    except Exception:
+        pass  # mining is opportunistic; never fails the request
+
     extraction = await verify(llm(), extraction, retrieval)
 
     result = finalize_row(
@@ -125,6 +149,21 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
             for c in result.physics.checks
         ]
 
+    # Unilog internal Dept/Class/Fine taxonomy
+    from pipeline.taxonomy import apply_unilog_taxonomy
+
+    taxo = apply_unilog_taxonomy(
+        classification.classpath if classification else None,
+        extraction.item_type if extraction else None,
+    )
+    if taxo["dept"]:
+        result.output_row["Dept"] = taxo["dept"]
+        result.output_row["Class"] = taxo["klass"]
+        result.output_row["Fine"] = taxo["fine"]
+
+    features_list = extraction.features[:15] if extraction else []
+    certs_str = "|".join(extraction.certifications) if extraction else ""
+
     record = {
         "mpn": result.mfg_part_num,
         "shortDesc": result.output_row.get("SHORT_DESC", ""),
@@ -133,9 +172,18 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
         "unspsc": (classification.unspsc or "") if classification else "",
         "brand": result.output_row.get("BRAND_NAME", ""),
         "manufacturer": result.output_row.get("MANUFACTURER_NAME", ""),
+        "tradeName": result.output_row.get("TRADE_NAME", ""),
         "invoiceDesc": result.output_row.get("INVOICE_DESC", ""),
         "mobileDesc": result.output_row.get("MOBILE_DESC", ""),
         "retailDesc": result.output_row.get("RETAIL_DESC", ""),
+        "marketingDesc": result.output_row.get("MARKETING_DESCRIPTION", ""),
+        "featuresList": features_list,
+        "certificationsStr": certs_str,
+        "application": (extraction.application or "") if extraction else "",
+        "includes": (extraction.includes or "") if extraction else "",
+        "dept": taxo["dept"],
+        "class": taxo["klass"],
+        "fine": taxo["fine"],
         "flags": result.flags,
         "triage": result.triage_score,
         "physics": physics,
@@ -146,15 +194,17 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
             "flags": retrieval.flags if retrieval else [],
         },
         "assets": {
-            k: v
-            for k, v in result.output_row.items()
+            k: v for k, v in result.output_row.items()
             if k in ("MFR URL", "Product Image", "Alternate Image 1",
-                     "Specification Sheet", "Actual Image (Yes/No)")
+                     "Alternate Image 2", "Alternate Image 3",
+                     "Alternate Image 4", "Specification Sheet",
+                     "Actual Image (Yes/No)")
             or k.startswith("Ref URL")
         },
+        "outputRow": {k: v for k, v in result.output_row.items() if v},
         "attributes": [
             {
-                "label": a.label,
+                "label": a.label.title(),
                 "value": a.value,
                 "uom": a.uom,
                 "verdict": a.verdict,
@@ -163,19 +213,8 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
                 "url": a.evidence.url if a.evidence else None,
                 "reviewReason": a.review_reason,
             }
-            for a in [
-                type(a)(
-                    label=a.label.title(),
-                    value=a.value,
-                    uom=a.uom,
-                    evidence=a.evidence,
-                    verdict=a.verdict,
-                    confidence=a.confidence,
-                    review_reason=a.review_reason,
-                )
-                for a in extraction.attributes
-            ]
-        ],
+            for a in extraction.attributes
+        ] if extraction else [],
     }
 
     echo = {

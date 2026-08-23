@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import csv
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -138,7 +139,13 @@ def build_output_row(
     out: dict[str, str] = {
         "MANUFACTURER_NAME": manufacturer,
         "BRAND_NAME": brand or "",
-        "TRADE_NAME": brand if brand and extraction and extraction.brand else "",
+        "TRADE_NAME": (
+            brand
+            if brand and extraction and extraction.brand
+            and re.sub(r"[^A-Za-z0-9]", "", brand).lower()
+            != re.sub(r"[^A-Za-z0-9]", "", manufacturer or "").lower()
+            else ""
+        ),
         "MANUFACTURER_PART_NUMBER": row.mfg_part_num,
         "Classpath": classification.classpath if classification else "",
         "UNSPSC": (classification.unspsc or "") if classification else "",
@@ -257,6 +264,17 @@ def finalize_row(
     if classification is None:
         result.flags.append("NEEDS_REVIEW")
     result.output_row = build_output_row(row, classification, retrieval, extraction)
+    # Unilog internal Dept/Class/Fine taxonomy (differs from public classpath)
+    from pipeline.taxonomy import apply_unilog_taxonomy
+
+    taxo = apply_unilog_taxonomy(
+        classification.classpath if classification else None,
+        extraction.item_type if extraction else None,
+    )
+    if taxo["dept"]:
+        result.output_row["Dept"] = taxo["dept"]
+        result.output_row["Class"] = taxo["klass"]
+        result.output_row["Fine"] = taxo["fine"]
     unsupported = [a for a in extraction.attributes if a.verdict == "UNSUPPORTED"]
     if extraction.attributes and len(unsupported) >= len(extraction.attributes):
         result.flags.append("NEEDS_REVIEW")

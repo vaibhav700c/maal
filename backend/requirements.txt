@@ -8,3 +8,5 @@ z3-solver>=0.4
 python-multipart>=0.0.9
 pandas>=2.2
 openpyxl>=3.1
+PyMuPDF>=1.28
+pypdf>=4.0

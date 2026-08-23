@@ -1,0 +1,103 @@
+"""Unilog internal Dept/Class/Fine taxonomy mapping.
+
+The public Classpath (what distributors see) differs from Unilog's internal
+Dept > Class > Fine hierarchy used in the Delivery Format. This table maps
+the catalog's product families to that internal taxonomy; unmatched products
+fall back to their public classpath parts.
+"""
+import re
+
+# keyword -> (Dept, Class, Fine); first match wins (checked in order)
+UNILOG_TAXONOMY: list[tuple[str, str, str, str]] = [
+    # appliances
+    ("dishwasher", "Appliances", "Large Appliances", "Dishwashers"),
+    ("refrigerator|fridge", "Appliances", "Large Appliances", "Refrigerators"),
+    ("freezer", "Appliances", "Large Appliances", "Freezers"),
+    ("dryer", "Appliances", "Large Appliances", "Clothes Dryers"),
+    ("washer|laundry", "Appliances", "Large Appliances", "Clothes Washers"),
+    ("microwave|otr microwave", "Appliances", "Large Appliances", "Microwaves"),
+    ("range|cooktop|oven", "Appliances", "Large Appliances", "Ranges & Ovens"),
+    ("beverage center|coffee|espresso|toaster", "Appliances", "Small Appliances", "Kitchen Appliances"),
+    # lighting
+    ("chandelier|pendant", "Lighting", "Decorative Lighting", "Chandeliers & Pendants"),
+    ("wall light|wall lt|sconce|ext wall", "Lighting", "Outdoor Lighting", "Wall Lights"),
+    ("ceiling light|downlight|flat panel|highbay", "Lighting", "Commercial Lighting", "Ceiling Lights"),
+    ("led bulb|incan|halogen|bulb|lamp a19|mr16|par38|br30", "Lighting", "Lamps", "LED Lamps"),
+    ("flashlight|headlight|clip light|work light|shop light", "Lighting", "Portable Lighting", "Flashlights & Work Lights"),
+    ("tape light|strip light", "Lighting", "Accent Lighting", "Tape & Strip Lights"),
+    ("motion light", "Lighting", "Outdoor Lighting", "Security Lights"),
+    # abrasives / cutting
+    ("cut off disc|cut-off disc|cut off wheel|metal cut", "Tools", "Abrasives", "Cut-Off Wheels"),
+    ("grinding wheel", "Tools", "Abrasives", "Grinding Wheels"),
+    ("masonry cut|masonry grind", "Tools", "Abrasives", "Masonry Wheels"),
+    ("sanding belt", "Tools", "Abrasives", "Sanding Belts"),
+    ("sandpaper|stikit|abrasive sheet|sanding sponge|abranet|hiolit", "Tools", "Abrasives", "Sandpaper & Sheets"),
+    ("saw blade|circ saw|miter saw blade|track saw", "Tools", "Accessories", "Saw Blades"),
+    ("jig saw blade|recip blade|bandsaw blade", "Tools", "Accessories", "Blade Accessories"),
+    ("router bit|plug cutter|countersink", "Tools", "Accessories", "Router Bits"),
+    ("planer blade|dado", "Tools", "Accessories", "Planer Accessories"),
+    ("diamond.*blade|tile blade", "Tools", "Accessories", "Diamond Blades"),
+    ("hole dozer|hole saw", "Tools", "Accessories", "Hole Saws"),
+    # fasteners
+    ("nailer|brad nailer|framing nailer", "Tools", "Pneumatic Tools", "Nailers"),
+    ("finish nail|brad bb|staple\b", "Hardware", "Fasteners", "Nails & Staples"),
+    # tools
+    ("drill|hammer drill", "Tools", "Power Tools", "Drills"),
+    ("impact driver|impact wrench", "Tools", "Power Tools", "Impact Tools"),
+    ("sander|polisher", "Tools", "Power Tools", "Sanders"),
+    ("grinder|die grinder", "Tools", "Power Tools", "Grinders"),
+    ("router\b|plunge.*router", "Tools", "Power Tools", "Routers"),
+    ("jig saw|recip saw|circular saw|miter saw|table saw|track saw|band saw", "Tools", "Power Tools", "Saws"),
+    ("screwdriver|bit holder|drive bit|torsion bit|socket adapter", "Tools", "Hand Tools", "Screwdriving"),
+    ("ratchet|wrench set|mechanics set|universal joint", "Tools", "Hand Tools", "Wrenches & Sockets"),
+    ("laser|line laser", "Tools", "Measuring & Layout", "Lasers"),
+    ("rafter square|t-square|bigcal|caliper", "Tools", "Measuring & Layout", "Layout Tools"),
+    ("voltage detector", "Tools", "Electrical Tools", "Testers"),
+    ("fence|xtender|sled|align-a-saw", "Tools", "Table Saw Accessories", "Fences & Guides"),
+    ("tool chest|packout|organizer|starter kit|battery|charger", "Tools", "Tool Storage & Power", "Batteries & Storage"),
+    ("grease gun|blower|trimmer|vacuum|speaker", "Tools", "Outdoor Power Equipment", "OPE & Site Gear"),
+    # safety
+    ("safety glasses|hearing protector", "Safety", "Personal Protective Equipment", "Eye & Ear Protection"),
+    ("glove|hoodie", "Safety", "Workwear", "Heated Workwear"),
+    ("fire extinguisher", "Safety", "Fire Safety", "Extinguishers"),
+    ("smoke|co alarm", "Safety", "Fire Safety", "Alarms"),
+    # electrical
+    ("gfci|outlet|receptacle|switch|dimmer|timer|wallplate|box cover|load center|cord grip", "Electrical", "Wiring Devices", "Wiring Devices"),
+    ("wire|cable|cord\b", "Electrical", "Wire & Cable", "Conductor"),
+    # building materials
+    ("decking|fascia|rail kit|post sleeve|post cap|baluster|railing|joist tape|post wrap", "Building Materials", "Decking & Railing", "Deck Components"),
+    ("vinyl plank|laminate|hardwood|drywall|osb|sheathing|plywood", "Building Materials", "Interior Finishes", "Panel Goods"),
+    ("hardiepanel|smart lap|smartside|soffit|siding", "Building Materials", "Exterior Cladding", "Siding & Trim"),
+    ("mortar", "Building Materials", "Concrete & Mortar", "Colored Mortar"),
+    ("skylight|patio dr|hopper|slider window", "Building Materials", "Windows & Doors", "Skylights & Patio Doors"),
+    ("threshold|hanger|attic access", "Building Materials", "Millwork & Hardware", "Door Hardware"),
+    ("ice guard|rainscreen|eaveguard", "Building Materials", "Roofing", "Roof Underlayment"),
+    ("post sleeve|support post", "Building Materials", "Structural", "Posts & Columns"),
+    # plumbing fixtures
+    ("faucet|sink\b", "Plumbing", "Kitchen & Bath", "Faucets"),
+]
+
+# supplier-name based corrections (distributor vs maker disambiguation)
+
+
+def dept_class_fine(text: str) -> tuple[str | None, str | None, str | None]:
+    """Map free text (classpath leaf or description) to internal taxonomy."""
+    low = text.lower()
+    for pattern, dept, klass, fine in UNILOG_TAXONOMY:
+        if re.search(pattern, low):
+            return dept, klass, fine
+    return None, None, None
+
+
+def apply_unilog_taxonomy(classpath: str | None, item_type: str | None) -> dict:
+    """Returns {dept, klass, fine} preferring keyword match over raw parts."""
+    for source in (item_type or "", classpath or ""):
+        d, k, f = dept_class_fine(source)
+        if d:
+            return {"dept": d, "klass": k, "fine": f}
+    parts = [p.strip() for p in (classpath or "").split(">") if p.strip()]
+    return {
+        "dept": parts[0] if parts else "",
+        "klass": parts[1] if len(parts) > 1 else parts[0] if parts else "",
+        "fine": parts[-1] if parts else "",
+    }
