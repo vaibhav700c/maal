@@ -253,6 +253,7 @@ async def _retrieve(
 
     flagged_marketplace = False
     product_page: str | None = None
+    candidate_refs: list[tuple[float, str]] = []
     for url in await search_mpn(http, ddgs_fn, domain, part_num):
         if is_marketplace(url):
             flagged_marketplace = True
@@ -260,8 +261,9 @@ async def _retrieve(
         tier = trust_tier(url, domain)
         if part_num.lower() in url.lower() and product_page is None:
             product_page = url  # deep link to the exact product page
-        if tier >= 0.9 and len(result.ref_urls) < 5:
-            result.ref_urls.append(url)
+        # collect docs (PDFs) and supporting owned pages for Ref URL slots
+        if len(candidate_refs) < 8:
+            candidate_refs.append((0.9 if url.lower().endswith(".pdf") or "/pdf" in url.lower() else (1.0 if tier == 1.0 else 2.0), url))
         try:
             resp = await http.get(url, timeout=12, follow_redirects=True)
             if resp.status_code != 200:
@@ -273,6 +275,16 @@ async def _retrieve(
         if len(result.snippets) >= 4:
             break
     result.product_url = product_page
+    # Ref URLs: spec-sheet PDFs first, then other owned pages, never the
+    # chosen product URL itself; non-owned tiers (2.0 = off-domain) dropped
+    pdfs = sorted([c for c in candidate_refs if c[0] == 0.9], key=lambda c: c[1])
+    pages = sorted(
+        [c for c in candidate_refs if c[0] == 1.0 and c[1] != product_page],
+        key=lambda c: c[1],
+    )
+    for _, u in (pdfs + pages)[:5]:
+        if u not in result.ref_urls:
+            result.ref_urls.append(u)
     if flagged_marketplace:
         result.flags.append("MARKETPLACE_HIT_EXCLUDED")
     if not result.snippets:
