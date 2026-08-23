@@ -83,6 +83,18 @@ def trust_tier(url: str, domain: str | None) -> float:
     return 0.8
 
 
+async def ddgs_site_hit(http: httpx.AsyncClient | None, domain: str, mpn: str) -> bool:
+    """True when a site-scoped search against `domain` returns the MPN.
+    Uses the Jina proxy so datacenter IP blocks don't matter."""
+    try:
+        for u in jina_ddg_urls(f"site:{domain} {mpn}"):
+            if registeredHost(u, domain) and mpn.lower() in u.split("?")[0].lower():
+                return True
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
 async def probe_domain(http: httpx.AsyncClient, domain: str) -> str | None:
     for scheme in ("https://", "https://www."):
         url = scheme + domain
@@ -134,8 +146,12 @@ async def resolve_domain(
         return cache[key]
     for cand in domain_candidates(mfr_name):
         if await probe_domain(http, cand):
-            cache[key] = cand
-            return cand
+            # a live HEAD isn't enough: parked/lookalike domains pass it.
+            # require that a site-scoped search against this domain actually
+            # returns the part number before trusting it.
+            if not mpn or await ddgs_site_hit(http, cand, mpn):
+                cache[key] = cand
+                return cand
     # Many manufacturer sites block bot probes outright. Fall back to asking
     # the search engine: the top organic hit whose HOST contains one of the
     # name's own tokens IS the official domain — no fetch of their servers
