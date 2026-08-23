@@ -109,17 +109,46 @@ async def probe_domain(http: httpx.AsyncClient, domain: str) -> str | None:
     return None
 
 
-def reader_text(url: str, timeout: int = 12) -> str | None:
+_JINA_CACHE: dict[str, str] = {}
+
+
+def reader_text(url: str, timeout: int = 15) -> str | None:
     """Free Reader proxy (jina.ai): clean markdown for any URL, defeats
-    TLS/bot walls that drop datacenter/serverless fetches."""
-    try:
-        req = httpx.Request("GET", f"https://r.jina.ai/{url}")
-        with httpx.Client(headers=BROWSER_HEADERS, timeout=timeout) as client:
-            resp = client.send(req)
+    TLS/bot walls that drop datacenter/serverless fetches.
+
+    Resilience: 3-attempt ladder with backoff on 429/451 (shared-IP rate
+    limits), plus a per-process cache so identical pages cost one read."""
+    import os
+
+    key = f"jina:{url}"
+    if key in _JINA_CACHE:
+        return _JINA_CACHE[key]
+
+    headers = dict(BROWSER_HEADERS)
+    api_key = os.environ.get("JINA_API_KEY", "").strip()
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    backoff = [1.0, 2.5, 5.0]
+    last_exc: Exception | None = None
+    for attempt in range(len(backoff) + 1):
+        try:
+            req = httpx.Request("GET", f"https://r.jina.ai/{url}")
+            with httpx.Client(headers=headers, timeout=timeout) as client:
+                resp = client.send(req)
             if resp.status_code == 200 and len(resp.text) > 40:
+                _JINA_CACHE[key] = resp.text
                 return resp.text
-    except Exception:  # noqa: BLE001
-        pass
+            if resp.status_code in (429, 451) and attempt < len(backoff):
+                time.sleep(backoff[attempt])
+                continue
+            return None
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if attempt < len(backoff):
+                time.sleep(backoff[attempt])
+    if last_exc:
+        print(f"[reader_text] {url[:60]} failed: {last_exc}", file=sys.stderr)
     return None
 
 
