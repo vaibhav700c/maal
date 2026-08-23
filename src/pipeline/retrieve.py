@@ -161,6 +161,21 @@ def _default_ddgs_fn():
     return query
 
 
+BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def make_http() -> httpx.AsyncClient:
+    """Browser-like client: many manufacturer sites drop default python UAs."""
+    return httpx.AsyncClient(headers=BROWSER_HEADERS, follow_redirects=True)
+
+
 async def search_mpn(http, ddgs_fn, domain: str, mpn: str) -> list[str]:
     """Return candidate URLs on the manufacturer domain referencing the MPN."""
     urls: list[str] = []
@@ -272,6 +287,12 @@ async def _retrieve(
             continue
         for window in snippet_windows(strip_html(resp.text), part_num):
             result.snippets.append(Evidence(quote=window, url=url, tier=tier))
+        # spec sheets / manuals are usually linked from the product page
+        for link in re.findall(r'href="([^"]+\.pdf[^"]*)"', resp.text, re.I)[:5]:
+            if link.startswith("/"):
+                link = f"https://{domain}{link}"
+            if domain.lower() in link.lower() and len(candidate_refs) < 8:
+                candidate_refs.append((0.9, link))
         if len(result.snippets) >= 4:
             break
     result.product_url = product_page
@@ -302,7 +323,7 @@ async def retrieve_for_row(
 ) -> RetrievalResult:
     cache = cache if cache is not None else {}
     own_client = http is None
-    http = http or httpx.AsyncClient()
+    http = http or make_http()
     try:
         return await _retrieve(
             row.mfr_name, row.mfg_part_num, row.part_desc, cache, http, ddgs_fn
@@ -322,7 +343,7 @@ async def retrieve_by_brand(
     """Second-pass lookup keyed by the resolved BRAND instead of the supplier."""
     cache = cache if cache is not None else {}
     own_client = http is None
-    http = http or httpx.AsyncClient()
+    http = http or make_http()
     try:
         return await _retrieve(
             brand, row.mfg_part_num, row.part_desc, cache, http, ddgs_fn

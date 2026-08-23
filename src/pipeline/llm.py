@@ -117,6 +117,44 @@ def parse_json_loose(text: str):
     return json.loads(body)
 
 
+import hashlib
+import json as _json
+from pathlib import Path
+
+
+class ResponseCache:
+    """Disk-backed prompt->response cache. Same prompt (+model) never pays
+    tokens twice, across runs. Enabled by default; LLM_CACHE=0 disables."""
+
+    def __init__(self, path: Path | None = None, enabled: bool | None = None):
+        import os
+
+        if enabled is None:
+            enabled = os.environ.get("LLM_CACHE", "1") != "0"
+        self.enabled = enabled
+        self.path = path or Path("output/cache/llm-responses.json")
+        self._data: dict[str, str] = {}
+        if self.enabled and self.path.exists():
+            try:
+                self._data = _json.loads(self.path.read_text())
+            except (json.JSONDecodeError, OSError):
+                self._data = {}
+
+    @staticmethod
+    def key(model: str, prompt: str, system: str | None) -> str:
+        blob = f"{model}\x00{system or ''}\x00{prompt}"
+        return hashlib.sha256(blob.encode()).hexdigest()[:32]
+
+    def get(self, key: str) -> str | None:
+        return self._data.get(key)
+
+    def put(self, key: str, value: str) -> None:
+        self._data[key] = value
+        if self.enabled:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(_json.dumps(self._data))
+
+
 class LLMClient:
     def __init__(self, settings=None, backend=None):
         if settings is None:
@@ -127,6 +165,8 @@ class LLMClient:
         self.backend = backend or GeminiBackend(settings.api_key, settings.model)
         self.limiter = RateLimiter(settings.rpm)
         self._injected_backend = backend is not None
+        # stub backends stay uncached so tests keep sequencing control
+        self.cache = None if backend is not None else ResponseCache()
 
     def _backend_for(self, model: str):
         if self._injected_backend:
@@ -134,6 +174,21 @@ class LLMClient:
         return GeminiBackend(self._settings.api_key, model)
 
     async def generate(self, prompt: str, system: str | None = None) -> str:
+        cache_key = None
+        if self.cache is not None:
+            model_id = getattr(self.backend, "model", "") or self._settings.model
+            cache_key = ResponseCache.key(model_id, prompt, system)
+            hit = self.cache.get(cache_key)
+            if hit is not None:
+                return hit
+        result = await self._generate_uncached(prompt, system, cache_key)
+        if self.cache is not None and cache_key:
+            self.cache.put(cache_key, result)
+        return result
+
+    async def _generate_uncached(
+        self, prompt: str, system: str | None, cache_key: str | None = None
+    ) -> str:
         if self._injected_backend:
             await self.limiter.acquire()
             return await retry_429(

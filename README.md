@@ -69,6 +69,12 @@ Outputs land in `output/`:
 | `state.jsonl` | Checkpoint; reruns skip completed rows |
 | `corrections.jsonl` | Human fixes applied on the next run |
 
+Caching & tokens: web retrieval is cached per supplier+MPN
+(`output/cache/retrieval.json`) and every LLM response is cached by prompt hash
+(`output/cache/llm-responses.json`) — identical prompts across runs cost zero
+tokens. Set `LLM_CACHE=0` to disable. Extraction covers warranty, country of
+origin, UPC, package quantity, and dimensions when a source states them.
+
 Free-tier behavior: batched calls (~8 rows/call), audit skipped where no
 manufacturer evidence exists, multi-model failover, graceful stop when every
 model's daily budget is spent — rerun later and it continues where it stopped.

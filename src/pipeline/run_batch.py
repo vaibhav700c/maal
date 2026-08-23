@@ -191,6 +191,32 @@ def build_output_row(
             out[f"ATTRIBUTE_LABEL {i}"] = attr.label
             out[f"ATTRIBUTE_VALUE {i}"] = attr.value
             out[f"ATTRIBUTE_UOM {i}"] = attr.uom or ""
+        # dedicated delivery-format columns mapped from well-known attributes
+        DIM_MAP = {
+            "Length": ("LENGTH", "LENGTH_UOM"),
+            "Height": ("HEIGHT", "HEIGHT_UOM"),
+            "Width": ("WIDTH", "WIDTH_UOM"),
+            "Weight": ("WEIGHT", "WEIGHT_UOM"),
+        }
+        for attr in extraction.attributes:
+            label_low = attr.label.lower()
+            if label_low == "warranty":
+                out.setdefault("Warranty", attr.value)
+                out.setdefault("Warranty Information", attr.value)
+            elif label_low == "country of origin":
+                out.setdefault("Country Of Origin", attr.value)
+            elif label_low == "upc" and attr.value.isdigit():
+                out.setdefault("UPC", attr.value)
+            elif label_low in ("package quantity", "pack quantity") and attr.value.isdigit():
+                out.setdefault("Selling Qty", attr.value)
+                out.setdefault("Selling UOM", "each")
+            elif label_low in DIM_MAP:
+                col, uom_col = DIM_MAP[label_low]
+                try:
+                    out.setdefault(col, f"{float(attr.value):g}")
+                    out.setdefault(uom_col, (attr.uom or "").strip())
+                except ValueError:
+                    pass
     return {k: v for k, v in out.items() if v != ""}
 
 

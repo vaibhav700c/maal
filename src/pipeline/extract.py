@@ -43,6 +43,10 @@ Output STRICT JSON:
   "certifications": ["UL Listed", ...],
   "application": "or null",
   "includes": "or null",
+  "warranty": "warranty statement with its verbatim quote, or null",
+  "country_of_origin": "e.g. 'USA', 'Germany' — only if a source states it, else null",
+  "upc": "12-digit UPC barcode ONLY if printed in a source, else null",
+  "package_quantity": "count per package as plain number (e.g. 10 for '10pc', 50 for '50 Disc/Box') with quote, or null",
   "additional": "misc specs sentence or null"}}
 
 Pre-extracted from the description (confirm, correct, or extend — do not drop unless wrong):
@@ -114,7 +118,7 @@ def _snippets_block(retrieval: RetrievalResult | None) -> str:
     if not retrieval or not retrieval.snippets:
         return "(none retrieved)"
     lines = []
-    for i, snip in enumerate(retrieval.snippets[:5]):
+    for i, snip in enumerate(retrieval.snippets[:3]):  # token budget: 3 windows max
         url = snip.url or "unknown"
         lines.append(f"[S{i}] {url}\n{snip.quote}")
     return "\n\n".join(lines)
@@ -198,6 +202,39 @@ def _parse_extraction(
         additional=data.get("additional") or None,
     )
     _fill_attributes(extraction, data, row, retrieval)
+    # scalar fields become first-class attributes so provenance flows through
+    for json_key, label in (
+        ("warranty", "Warranty"),
+        ("country_of_origin", "Country of Origin"),
+        ("upc", "UPC"),
+    ):
+        value = data.get(json_key)
+        if value and str(value).strip() and str(value).lower() != "null":
+            extraction.attributes.append(Attribute(
+                label=label,
+                value=str(value).strip(),
+                evidence=Evidence(
+                    quote=row.part_desc[:200],
+                    url=None,
+                    tier=0.0,
+                ),
+                verdict="UNVERIFIED",
+            ))
+    pq = data.get("package_quantity")
+    if isinstance(pq, dict) and str(pq.get("value", "")).strip().isdigit():
+        extraction.attributes.append(Attribute(
+            label="Package Quantity",
+            value=str(pq["value"]).strip(),
+            evidence=Evidence(quote=str(pq.get("quote") or row.part_desc[:200]), url=None, tier=0.0),
+            verdict="UNVERIFIED",
+        ))
+    elif isinstance(pq, (int, float)) or (isinstance(pq, str) and pq.strip().isdigit()):
+        extraction.attributes.append(Attribute(
+            label="Package Quantity",
+            value=str(pq).strip(),
+            evidence=Evidence(quote=row.part_desc[:200], url=None, tier=0.0),
+            verdict="UNVERIFIED",
+        ))
     merged = {a.label.lower(): a for a in extraction.attributes}
     for pre in pre_extract_attributes(row.part_desc):
         if pre.label.lower() not in merged:
