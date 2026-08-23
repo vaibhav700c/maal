@@ -94,7 +94,9 @@ async def probe_domain(http: httpx.AsyncClient, domain: str) -> str | None:
     return None
 
 
-async def resolve_domain(http, mfr_name: str | None, cache: dict) -> str | None:
+async def resolve_domain(
+    http, mfr_name: str | None, cache: dict, mpn: str | None = None
+) -> str | None:
     key = f"domain::{mfr_name or ''}"
     if key in cache:
         return cache[key]
@@ -112,19 +114,17 @@ async def resolve_domain(http, mfr_name: str | None, cache: dict) -> str | None:
         if len(t) >= 4
     ]
     if tokens and mfr_name:
-        try:
-            with DDGS() as client:
-                hits = list(client.text(mfr_name, max_results=8))
-        except Exception:  # noqa: BLE001
-            hits = []
-        for hit in hits:
-            href = (hit.get("href") or hit.get("url") or "").strip()
-            if not href.startswith("http"):
+        # Jina-proxied search: works from datacenter IPs where direct DDG is blocked
+        for url in jina_ddg_urls(f"{mpn or ''} {mfr_name}".strip()):
+            try:
+                host = urllib.parse.urlsplit(url).hostname or ""
+            except ValueError:
                 continue
-            host = href.split("/")[2].lower()
-            host_core = ".".join(host.split(".")[-2:])  # strip www./shop.
+            host_core = ".".join(host.split(".")[-2:])
             if any(t in host_core for t in tokens):
                 cache[key] = host_core
+                if mpn and mpn.lower() in url.lower():
+                    cache.setdefault(f"deep::{mfr_name}:{mpn}", url)
                 return host_core
     cache[key] = ""
     return None
@@ -258,11 +258,17 @@ async def _retrieve(
             return cached  # dead entries fall through so a later run retries
         del cache[key]
 
-    domain = await resolve_domain(http, name_for_domain, cache)
+    domain = await resolve_domain(http, name_for_domain, cache, part_num)
     result.domain = domain or None
+    deep_cached = cache.get(f"deep::{name_for_domain}:{part_num}")
     if domain is None:
         result.flags.append("NO_MFR_DOMAIN")
         return result
+    result.mfr_url = f"https://{domain}"
+    if deep_cached and not result.product_url:
+        result.product_url = deep_cached
+        if deep_cached not in result.ref_urls:
+            result.ref_urls.insert(0, deep_cached)
     base_url = f"https://{domain}"
     result.mfr_url = base_url
 
