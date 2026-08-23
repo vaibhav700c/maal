@@ -72,7 +72,7 @@ async def test_retrieve_happy_path_with_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(retrieve, "CACHE_PATH", tmp_path / "cache.json")
     # skip live domain validation inside unit scope
     async def true_hit(http, domain, mpn):
-        return True
+        return True, None
     monkeypatch.setattr(retrieve, "ddgs_site_hit", true_hit)
     page = "<html><body>Product page for DCB518ASTS06G sanding belt. Specs: 1/2 in x 18 in.</body></html>"
     http = _mock_http({"freud.com/search": f'<a href="/p/{ROW.mfg_part_num}">prod</a>',
