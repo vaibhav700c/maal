@@ -1,10 +1,38 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 export const OUTPUT_DIR =
   process.env.MAAL_OUTPUT_DIR ?? path.join(process.cwd(), "..", "output");
 
 export const PROJECT_ROOT = process.env.MAAL_ROOT ?? path.join(process.cwd(), "..");
+
+/** Hosted deployments ship a precomputed snapshot; local runs read live artifacts. */
+export const DEMO_DATA_DIR = path.join(process.cwd(), "demo-data");
+
+export function isCloud(): boolean {
+  return process.env.VERCEL === "1";
+}
+
+function exists(file: string): boolean {
+  try {
+    return fs.existsSync(file);
+  } catch {
+    return false;
+  }
+}
+
+/** Prefer live local artifacts; fall back to the bundled snapshot. */
+export function artifactBase(): string {
+  if (exists(path.join(OUTPUT_DIR, "result.csv"))) return OUTPUT_DIR;
+  return DEMO_DATA_DIR;
+}
+
+/** Corrections need a writable location; serverless tmp is ephemeral but works. */
+export function correctionsPath(): string {
+  if (isCloud()) return path.join(os.tmpdir(), "maal-corrections.jsonl");
+  return path.join(artifactBase(), "corrections.jsonl");
+}
 
 export type SidecarField = {
   value: string | null;
@@ -56,7 +84,7 @@ export type QueueRow = {
 };
 
 function readSidecar(): SidecarRecord[] {
-  const file = path.join(OUTPUT_DIR, "sidecar.jsonl");
+  const file = path.join(artifactBase(), "sidecar.jsonl");
   if (!fs.existsSync(file)) return [];
   return fs
     .readFileSync(file, "utf8")
@@ -139,7 +167,7 @@ export function getRow(mpn: string): {
 } | null {
   const record = readSidecar().find((r) => r.mfg_part_num === mpn);
   if (!record) return null;
-  const csvFile = path.join(OUTPUT_DIR, "result.csv");
+  const csvFile = path.join(artifactBase(), "result.csv");
   let csvRow: Record<string, string> = {};
   let headers: string[] = [];
   if (fs.existsSync(csvFile)) {
@@ -165,11 +193,9 @@ export function appendCorrection(rec: {
   attributes?: Record<string, string>;
   output_row?: Record<string, string>;
 }): void {
-  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-  fs.appendFileSync(
-    path.join(OUTPUT_DIR, "corrections.jsonl"),
-    JSON.stringify(rec) + "\n"
-  );
+  const file = correctionsPath();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, JSON.stringify(rec) + "\n");
 }
 
 export function artifactPath(name: string): string | null {

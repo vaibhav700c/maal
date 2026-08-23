@@ -3,6 +3,7 @@ import {
   anyJobRunning,
   createFileJob,
   createSingleProductJob,
+  isCloud,
   listJobs,
 } from "@/lib/jobs";
 
@@ -17,6 +18,12 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  if (isCloud()) {
+    return NextResponse.json(
+      { error: "This hosted deployment serves precomputed results. Clone the repo and run locally to enrich new products." },
+      { status: 501 }
+    );
+  }
   const contentType = request.headers.get("content-type") ?? "";
 
   if (anyJobRunning()) {

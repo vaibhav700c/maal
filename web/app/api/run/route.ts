@@ -2,7 +2,7 @@ import { spawn, execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
-import { OUTPUT_DIR, PROJECT_ROOT } from "@/lib/artifacts";
+import { OUTPUT_DIR, PROJECT_ROOT, isCloud } from "@/lib/artifacts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -95,6 +95,12 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  if (isCloud()) {
+    return NextResponse.json(
+      { error: "Pipeline execution runs locally. This deployment serves precomputed results." },
+      { status: 501 }
+    );
+  }
   let body: unknown = {};
   try {
     body = await request.json();

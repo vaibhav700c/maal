@@ -3,7 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import * as XLSX from "xlsx";
-import { OUTPUT_DIR, PROJECT_ROOT, parseCsv } from "./artifacts";
+import { OUTPUT_DIR, PROJECT_ROOT, isCloud, parseCsv } from "./artifacts";
+
+export { isCloud };
 import type { SidecarField } from "./artifacts";
 
 export const JOBS_DIR = path.join(OUTPUT_DIR, "jobs");
@@ -196,6 +198,10 @@ export function listJobs(): JobMeta[] {
 export function getJob(id: string): JobMeta | null {
   const meta = readMeta(id);
   return meta ? refreshMeta(meta) : null;
+}
+
+export function canRunPipeline(): boolean {
+  return !isCloud();
 }
 
 export function createSingleProductJob(input: {
