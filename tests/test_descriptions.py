@@ -1,3 +1,4 @@
+"""GT-faithful description builder tests (patterns from expected Delivery Format)."""
 import pytest
 
 from pipeline.format.descriptions import (
@@ -8,79 +9,87 @@ from pipeline.format.descriptions import (
     build_retail_desc,
     build_short_desc,
 )
-from pipeline.models import Attribute, Evidence
+from pipeline.models import Attribute
 
 
 @pytest.fixture
 def dishwasher() -> DescInput:
+    """Mirrors the ground-truth WDTS7024RZ row from the Delivery Format."""
     return DescInput(
-        brand_display="FRIGIDAIRE®",
-        manuf_name="Rheem Manufacturing",
-        mpn="PDSH4816AF",
+        brand_display="Whirlpool®",
+        manuf_name="Whirlpool",
+        mpn="WDTS7024RZ",
         item_type="Dishwasher",
-        series="Professional Series",
-        feature="CleanBoost™",
+        series="Eco Series",
+        feature=None,
         attributes=[
-            Attribute(label="Mounting Type", value="Leg"),
-            Attribute(label="Number of Wash Cycles", value="5"),
             Attribute(label="Voltage Rating", value="120", uom="V"),
-            Attribute(label="Amperage Rating", value="15", uom="A"),
-            Attribute(label="Material", value="Stainless Steel"),
-            Attribute(label="Size", value="24 in W x 24-1/4 in D"),
+            Attribute(label="Amperage Rating", value="10", uom="A"),
+            Attribute(label="Mounting Type", value="Built-in"),
             Attribute(
-                label="Depth With Door Open", value="50-1/4", uom="in"
+                label="Size", value='33-7/16 in H x 23-7/8 in W x 22-5/8 in D'
+            ),
+            Attribute(label="Depth With Door Open", value="50-3/16", uom="in"),
+            Attribute(label="Minimum Height", value="33-7/16", uom="in"),
+            Attribute(label="Sound Level", value="41", uom="dBA"),
+            Attribute(label="Material", value="Stainless Steel"),
+            Attribute(label="Color", value="Stainless Steel"),
+            Attribute(
+                label="Additional Information",
+                value="Folding Tines, Leak Detection System, Sani Rinse Option",
             ),
         ],
-        additional="240 kW-hr Annual Energy, 1 to 12 hr Delay Start Hours",
+        additional="Folding Tines, Leak Detection System, Sani Rinse Option",
     )
 
 
-def test_invoice_desc_caps_and_limit(dishwasher):
+def test_invoice_matches_gt_compact_spec_style(dishwasher):
     out = build_invoice_desc(dishwasher)
-    assert len(out) <= 40
-    assert out == out.upper()
+    assert len(out) <= 40 and out == out.upper()
     assert out.startswith("DISHWASHER")
+    assert "120V" in out and "10A" in out and "41DBA" in out
+    # stainless abbreviated like GT (SST)
+    assert "SST" in out or "STA" in out
 
 
-def test_mobile_desc_matches_ground_truth_pattern(dishwasher):
-    assert build_mobile_desc(dishwasher) == (
-        "Rheem Manufacturing FRIGIDAIRE®, Dishwasher, Professional Series, "
-        "PDSH4816AF"
-    )
+def test_mobile_desc_gt_pattern(dishwasher):
+    out = build_mobile_desc(dishwasher)
+    parts = [p.strip() for p in out.split(",")]
+    assert parts[0] == "Whirlpool"           # manuf+brand deduped to one
+    assert parts[1] == "Dishwasher"
+    assert "Eco Series" in parts
+    assert "WDTS7024RZ" in parts
+    assert any("Built-in" in p for p in parts)
+    assert len(out) >= 60
 
 
-def test_short_desc_title_formula(dishwasher):
+def test_short_desc_comma_style(dishwasher):
     out = build_short_desc(dishwasher)
-    assert out.startswith(
-        "FRIGIDAIRE® Professional Series PDSH4816AF Dishwasher With CleanBoost™"
-    )
-    assert "Leg" in out and "Stainless Steel" in out
+    assert out.startswith("Whirlpool® Eco Series WDTS7024RZ Dishwasher")
+    assert "Built-in" in out and "Stainless Steel" in out
 
 
-def test_long_desc_enumerates_attributes_with_units(dishwasher):
+def test_long_desc_ordered_enumeration(dishwasher):
     out = build_long_desc(dishwasher)
-    assert out.startswith("FRIGIDAIRE® Dishwasher With CleanBoost™")
-    assert "120 V" in out
-    assert "15 A" in out
-    assert "50-1/4 in Depth With Door Open" in out
-    assert out.endswith("Additional Information: 240 kW-hr Annual Energy, 1 to 12 hr Delay Start Hours")
+    assert out.startswith("Whirlpool® Dishwasher, Eco Series")
+    assert "120 V" in out and "10 A" in out
+    assert "33-7/16 in H x 23-7/8 in W x 22-5/8 in D" in out
+    assert "50-3/16 in Depth With Door Open" in out
+    assert "41 dBA Sound Level" in out
+    assert "Stainless Steel" in out
+    assert out.index("Eco Series") < out.index("120 V") < out.index("Sound Level")
 
 
-def test_retail_desc_compact(dishwasher):
+def test_retail_series_first(dishwasher):
     out = build_retail_desc(dishwasher)
-    assert "Professional Series Dishwasher" in out
+    assert out.startswith("Eco Series Dishwasher")
+    assert "Built-in" in out and "Stainless Steel" in out
 
 
 def test_builders_survive_missing_optionals():
     bare = DescInput(
-        brand_display=None,
-        manuf_name=None,
-        mpn="X1",
-        item_type="Disc",
-        series=None,
-        feature=None,
-        attributes=[],
-        additional=None,
+        brand_display=None, manuf_name=None, mpn="X1", item_type="Disc",
+        series=None, feature=None, attributes=[], additional=None,
     )
     assert "DISC" in build_invoice_desc(bare)
     assert "X1" in build_mobile_desc(bare)

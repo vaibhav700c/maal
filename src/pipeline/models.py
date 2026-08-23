@@ -44,6 +44,9 @@ class Classification(BaseModel):
 class Extraction(BaseModel):
     item_type: str
     series: str | None = None
+    classpath: str | None = None       # extractor may classify inline (cloud path)
+    unspsc: str | None = None
+    official_domain: str | None = None
     brand: str | None = None          # brand as printed on the product (e.g. 3M)
     brand_inferred: bool = False      # True when brand came from model-code knowledge
     manufacturer: str | None = None   # actual manufacturer, may differ from supplier

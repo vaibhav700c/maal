@@ -83,18 +83,30 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
         "-- Unbranded --", "-- No Unilog Brand --", "-- No DIB Brand --",
         p.supplier or "-",
     )
-    classifications = await classify_rows(llm(), [row])
-    classification = classifications.get(row.mfg_part_num)
+    # extraction classifies inline now; no separate classify call needed
+    classification = None
 
     retrieval = await retrieve_for_row(row, cache={})
-    extraction = await extract(llm(), row, classification, retrieval)
+    extraction = await extract(llm(), row, None, retrieval)
+    if classification is None and getattr(extraction, "classpath", None):
+        from pipeline.models import Classification
+
+        parts = [p.strip() for p in extraction.classpath.split(">")]
+        classification = Classification(
+            dept=parts[0] if parts else "",
+            klass=parts[1] if len(parts) > 1 else "",
+            fine=parts[-1] if parts else "",
+            classpath=extraction.classpath,
+            unspsc=getattr(extraction, "unspsc", None),
+        )
 
     # brand-based second pass when the supplier turned out to be a distributor
-    if extraction.brand and not (
+    domain_hint = getattr(extraction, "official_domain", None)
+    if (extraction.brand or domain_hint) and not (
         retrieval.product_url or retrieval.ref_urls or retrieval.snippets
     ):
         upgraded = await retrieve_by_brand(
-            extraction.brand, row, cache={}, ddgs_fn=None
+            domain_hint or extraction.brand, row, cache={}, ddgs_fn=None
         )
         if upgraded.product_url or upgraded.ref_urls or upgraded.snippets:
             upgraded.flags.append("BRAND_DOMAIN_LOOKUP")

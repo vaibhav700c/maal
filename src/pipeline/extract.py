@@ -32,8 +32,20 @@ CLASSPATH: {classpath}
 SOURCE SNIPPETS (manufacturer-owned pages):
 {snippets}
 
+You are enriching for a distributor catalog. For appliances and spec-heavy
+products, mine the snippets deeply and populate these labels EXACTLY when the
+source states them: Series, Model Number, Voltage Rating, Amperage Rating,
+Number of Wash Cycles, Mounting Type, Size (full H x W x D string), Depth With
+Door Open, Minimum Height, Maximum Height, Sound Level, Material, Color,
+Capacity. Also fill features with every distinct selling-point phrase on the
+page (rack systems, cycles, dispensers), certifications with every listed
+approval (UL, NSF, ENERGY STAR...), and application/includes when stated.
+
 Output STRICT JSON:
-{{"item_type": "short product type noun",
+{{"classpath": "FULL-DEPTH distributor taxonomy path with >=3 levels, e.g. 'Appliances & Consumer Electronics > Kitchen Appliances > Built-In Dishwashers' for a dishwasher, 'Hardware > Power Tool Accessories > Abrasive Cut-Off Wheels' for a cut-off disc — never a 2-level shortcut",
+  "unspsc": "6-digit UNSPSC code or null",
+  "official_domain": "brand's official website domain like example.com, or null",
+  "item_type": "short product type noun",
   "series": "series name or null",
   "brand": "brand printed on the product OR confidently inferred from the model number (e.g. '3M', 'Diablo', 'Leviton', 'Frigidaire') or null — NOT the distributor",
   "brand_inferred": true if brand came from model-number knowledge rather than text, else false,
@@ -118,7 +130,7 @@ def _snippets_block(retrieval: RetrievalResult | None) -> str:
     if not retrieval or not retrieval.snippets:
         return "(none retrieved)"
     lines = []
-    for i, snip in enumerate(retrieval.snippets[:3]):  # token budget: 3 windows max
+    for i, snip in enumerate(retrieval.snippets[:4]):  # spec pages need room
         url = snip.url or "unknown"
         lines.append(f"[S{i}] {url}\n{snip.quote}")
     return "\n\n".join(lines)
@@ -192,6 +204,9 @@ def _parse_extraction(
     extraction = Extraction(
         item_type=str(data.get("item_type") or "Product"),
         series=data.get("series") or None,
+        classpath=data.get("classpath") or None,
+        unspsc=data.get("unspsc") or None,
+        official_domain=data.get("official_domain") or None,
         brand=(str(data["brand"]).strip() if data.get("brand") else None),
         manufacturer=(str(data["manufacturer"]).strip() if data.get("manufacturer") else None),
         brand_inferred=bool(data.get("brand_inferred")),
