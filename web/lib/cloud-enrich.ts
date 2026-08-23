@@ -32,12 +32,20 @@ export type CloudInput = {
 // ---------- generic LLM ----------
 let domainCache = new Map<string, string>();
 
+function withTimeout(ms: number): { signal: AbortSignal; done: () => void } {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  return { signal: ctrl.signal, done: () => clearTimeout(timer) };
+}
+
 async function geminiText(prompt: string, system?: string): Promise<string> {
   if (!KEY) throw new Error("GEMINI_API_KEY missing");
   let lastErr = "";
   for (const model of MODELS) {
     try {
+      const t = withTimeout(30000);
       const res = await fetch(`${GEMINI}/${model}:generateContent?key=${KEY}`, {
+        signal: t.signal,
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -51,6 +59,7 @@ async function geminiText(prompt: string, system?: string): Promise<string> {
         lastErr = `${model}: ${res.status} ${data?.error?.message ?? ""}`;
         continue;
       }
+      t.done();
       return data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? "").join("") ?? "";
     } catch (e: any) {
       lastErr = `${model}: ${e?.message ?? e}`;
@@ -291,11 +300,14 @@ function registeredHost(url: string, domain: string): boolean {
 }
 
 async function ddgsSearch(query: string): Promise<string[]> {
+  const t = withTimeout(8000);
   const res = await fetch("https://html.duckduckgo.com/html/", {
     method: "POST",
+    signal: t.signal,
     headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded" },
     body: `q=${encodeURIComponent(query)}`,
   });
+  t.done();
   if (!res.ok) return [];
   const html = await res.text();
   const out: string[] = [];
@@ -337,10 +349,18 @@ async function pageText(url: string): Promise<string | null> {
 }
 
 async function probeUrl(url: string): Promise<string | null> {
+  const t = withTimeout(5000);
   try {
-    const res = await fetch(url, { method: "HEAD", headers: { "User-Agent": UA }, redirect: "follow" });
+    const res = await fetch(url, {
+      method: "HEAD",
+      headers: { "User-Agent": UA },
+      redirect: "follow",
+      signal: t.signal,
+    });
     if (res.status < 400) return res.url;
-  } catch { /* ignore */ }
+  } catch { /* ignore */ } finally {
+    t.done();
+  }
   return null;
 }
 
@@ -383,16 +403,6 @@ async function retrieve(
       }
     } catch { /* flaky */ }
     if (!urls.length && attempt === 0) await new Promise((r) => setTimeout(r, 1500));
-  }
-  if (!urls.length) {
-    for (const cand of [
-      `https://${domain}/en/p/${mpn}`,
-      `https://${domain}/p/${mpn}`,
-      `https://${domain}/product/${mpn}`,
-    ]) {
-      const final = await probeUrl(cand);
-      if (final && final.split("?")[0].toLowerCase().includes(mpn.toLowerCase())) { urls.push(final); break; }
-    }
   }
 
   const candidateRefs: Array<[number, string]> = [];
