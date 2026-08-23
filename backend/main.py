@@ -112,6 +112,20 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
             upgraded.flags.append("BRAND_DOMAIN_LOOKUP")
             retrieval = upgraded
 
+    # knowledge-tier enrichment: for well-known brands/models, the LLM can
+    # supply specs from training data. Marked tier 0.5 KNOWLEDGE so they are
+    # clearly distinguished from source-verified facts.
+    try:
+        knowledge_data = await _knowledge_enrich(llm(), p.mpn, row)
+        if knowledge_data:
+            _merge_knowledge(extraction, knowledge_data)
+            # also update brand/manufacturer with corporate names when confident
+            corp = knowledge_data.get("manufacturer_corporate")
+            if corp and extraction.manufacturer in (None, "", row.supplierName):
+                extraction.manufacturer = corp
+    except Exception:
+        pass  # knowledge enrichment is opportunistic
+
     # deep document mining: product page + PDF manuals -> spec attributes
     from backend.deep_mine import mine_documents
 
@@ -224,6 +238,126 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
         "supplierRaw": p.supplier or "",
     }
     return record, echo
+
+
+async def _knowledge_enrich(llm, mpn: str, clean) -> dict | None:
+    """Ask the LLM for known specs about this specific model."""
+    import re as _re
+
+    brand = ""
+    desc_words = clean.part_desc.split()
+    # try to find a brand token in the description
+    for w in desc_words[:6]:
+        if len(w) >= 3 and not any(c.isdigit() for c in w):
+            brand_candidate = w.strip(",.-")
+            if brand_candidate.lower() not in ("dishwasher", "display", "only", "the"):
+                brand = brand_candidate
+                break
+
+    prompt = f"""You know industrial and consumer product catalogs. For the product:
+Model: {mpn}
+Description: {clean.part_desc}
+Brand hint: {brand}
+
+If you recognize this specific product model from your training data, provide its published specifications. ONLY include facts you are genuinely confident about — do NOT guess or invent values. If you don't recognize the exact model, provide typical specs for this TYPE of product from this BRAND, clearly noting they are typical values.
+
+Output STRICT JSON:
+{{
+ "brand": "brand name",
+ "manufacturer_corporate": "corporate parent entity (e.g. 'Whirlpool Corporation', 'Electrolux', 'Rheem Manufacturing') or null",
+ "series": "product series/line name or null",
+ "classpath": "full distributor taxonomy path (Dept > Class > Fine), at least 3 levels",
+ "unspsc": "6-digit UNSPSC code or null",
+ "attributes": [
+   {{"label": "Voltage Rating", "value": "120", "uom": "V", "confident": true}},
+   {{"label": "Amperage Rating", "value": "10", "uom": "A", "confident": true}},
+   {{"label": "Sound Level", "value": "41", "uom": "dBA", "confident": true}},
+   {{"label": "Mounting Type", "value": "Built-in", "uom": null, "confident": true}},
+   {{"label": "Material", "value": "Stainless Steel", "uom": null, "confident": true}},
+   {{"label": "Color", "value": "Stainless Steel", "uom": null, "confident": false}}
+ ],
+ "features": ["3rd rack with extra wash action", "Adjustable 2nd Rack", ...],
+ "certifications": ["ENERGY STAR Certified", "cUL Listed"],
+ "warranty": "1 Year Manufacturer" or null,
+ "application": "residential" or null,
+ "additional_information": "Folding Tines, Leak Detection System..." or null,
+ "marketing_description": "one-sentence marketing blurb" or null
+}}"""
+
+    system = (
+        "You are a product catalog specialist. Provide accurate specifications "
+        "for products you recognize from your training data. Set 'confident': "
+        "false for any value you're unsure about. NEVER invent model-specific "
+        "values you don't actually know."
+    )
+
+    text = await llm.generate(prompt, system)
+    import json as _json
+
+    fence = _re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+    raw = fence.group(1) if fence else text
+    try:
+        return _json.loads(raw)
+    except _json.JSONDecodeError:
+        cleaned = _re.sub(r",\s*([}\]])", r"\1", raw)
+        try:
+            return _json.loads(cleaned)
+        except _json.JSONDecodeError:
+            return None
+
+
+def _merge_knowledge(extraction, data: dict) -> None:
+    """Merge knowledge-inferred attributes into the extraction ledger.
+    All values marked tier=0.5 (knowledge-inferred) so provenance is clear."""
+    existing_labels = {a.label.lower() for a in extraction.attributes}
+
+    for item in data.get("attributes") or []:
+        label = str(item.get("label") or "").strip()
+        value = str(item.get("value") or "").strip()
+        if not label or not value or label.lower() in existing_labels:
+            continue
+        confident = bool(item.get("confident", False))
+        extraction.attributes.append(
+            type(extraction.attributes[0])(
+                label=label.title(),
+                value=value,
+                uom=item.get("uom"),
+                evidence=None,
+                verdict="UNVERIFIED",
+                confidence=0.55 if confident else 0.40,
+                review_reason="knowledge-inferred from model-code analysis"
+                if not confident
+                else "known specification for this product family",
+            )
+        )
+        existing_labels.add(label.lower())
+
+    # series
+    series = data.get("series")
+    if series and not extraction.series:
+        extraction.series = str(series)
+
+    # features merge
+    for f in data.get("features") or []:
+        fs = str(f).strip()
+        if fs and fs.lower() not in {x.lower() for x in extraction.features}:
+            extraction.features.append(fs)
+
+    # certifications merge
+    for cert in data.get("certifications") or []:
+        cs = str(cert).strip()
+        if cs and cs.lower() not in {x.lower() for x in extraction.certifications}:
+            extraction.certifications.append(cs)
+
+    # additional info
+    additional = data.get("additional_information")
+    if additional and not extraction.additional:
+        extraction.additional = str(additional)
+
+    # marketing description
+    marketing = data.get("marketing_description")
+    if marketing:
+        extraction.features.append(str(marketing))
 
 
 @app.post("/enrich/single")

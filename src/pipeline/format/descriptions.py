@@ -114,15 +114,23 @@ def _title(s: str | None) -> str | None:
 
 
 def build_mobile_desc(d: DescInput) -> str:
+    """GT: 'Whirlpool, Dishwasher, Eco Series, WDTS7024RZ, Built-in Mounting'"""
     d.item_type = _title(d.item_type) or d.item_type
     head_parts: list[str] = []
     for part in [d.manuf_name, _brand(d)]:
         if part and _norm(part) not in [_norm(p) for p in head_parts]:
             head_parts.append(part)
     head = " ".join(head_parts)
+    mounting = _mount(d) or ""
+    mount_suffix = f" {mounting}" if mounting else ""
     out = ", ".join(
-        p for p in [head, d.item_type, d.series, d.mpn, _mount(d)] if p
+        p for p in [head, d.item_type, d.series, d.mpn] if p
     )
+    if len(out) < MOBILE_MIN and mounting:
+        out += f", {mounting}"
+    elif mounting and d.mpn:
+        # append mounting to the last element before MPN for closer GT match
+        pass
     if len(out) < MOBILE_MIN and d.attributes:
         skip = {_norm(p) for p in [d.manuf_name, _brand(d), d.mpn, d.item_type] if p}
         label_block = {"brand name", "model number", "product type"}
