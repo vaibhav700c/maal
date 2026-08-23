@@ -79,7 +79,13 @@ export async function POST(request: Request) {
     }
     try {
       const rows = await enrichMany(inputs);
-      return NextResponse.json({ ok: true, rows, count: rows.length });
+      const echoes = inputs.map((i) => ({
+        mpn: i.mpn,
+        description: i.description,
+        brandRaw: i.brand ?? "",
+        supplierRaw: i.supplier ?? "",
+      }));
+      return NextResponse.json({ ok: true, rows, count: rows.length, echoes });
     } catch (e: any) {
       return NextResponse.json(
         { error: `Enrichment failed: ${e?.message?.slice(0, 160) ?? "unknown"}` },

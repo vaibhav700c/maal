@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Card, Btn, PageTitle } from "@/components/ui";
 import { RecordCard, type JobResultRow } from "@/components/record-card";
+import { buildDeliveryCsv, type InputEcho } from "@/lib/delivery-export";
 import RevealOnMount from "@/components/reveal";
 
 export default function EnrichPage() {
@@ -17,35 +18,25 @@ export default function EnrichPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [rows, setRows] = useState<JobResultRow[] | null>(null);
+  const [echoes, setEchoes] = useState<InputEcho[]>([]);
 
-  async function downloadCsv() {
+  function downloadCsv() {
     if (!rows?.length) return;
-    const headers = ["mpn", "classpath", "unspsc", "brand", "manufacturer",
-      "invoiceDesc", "mobileDesc", "shortDesc", "longDesc", "retailDesc"];
-    for (let i = 1; i <= Math.max(...rows.map((r) => r.attributes.length)); i++) {
-      headers.push(`attr${i}_label`, `attr${i}_value`, `attr${i}_uom`);
-    }
-    const esc = (v: string) => (/["\n,]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-    const lines = [headers.join(",")];
-    for (const r of rows) {
-      const base: Record<string, string> = {
-        mpn: r.mpn, classpath: r.classpath, unspsc: r.unspsc,
-        brand: r.brand, manufacturer: r.manufacturer,
-        invoiceDesc: r.invoiceDesc, mobileDesc: r.mobileDesc,
-        shortDesc: r.shortDesc, longDesc: r.longDesc, retailDesc: r.retailDesc,
-      };
-      const cells = headers.map((h) => {
-        if (h in base) return esc(base[h]);
-        const m = /attr(\d+)_(label|value|uom)/.exec(h);
-        if (m) return esc(r.attributes[Number(m[1]) - 1]?.[(m[2] as "label" | "value" | "uom")] ?? "");
-        return "";
-      });
-      lines.push(cells.join(","));
-    }
-    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const pairs = rows.map((row, i) => [
+      row,
+      echoes[i] ?? {
+        mpn: row.mpn,
+        description: "",
+        brandRaw: "",
+        supplierRaw: "",
+      },
+    ] as [JobResultRow, InputEcho]);
+    const blob = new Blob([buildDeliveryCsv(pairs)], {
+      type: "text/csv;charset=utf-8",
+    });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "enriched.csv";
+    a.download = "delivery-format.csv";
     a.click();
     URL.revokeObjectURL(a.href);
   }
@@ -62,6 +53,7 @@ export default function EnrichPage() {
         return;
       }
       setRows(body.rows as JobResultRow[]);
+      setEchoes((body.echoes ?? []) as InputEcho[]);
       setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }), 50);
     } catch {
       setError("Could not reach the server. Try again.");
@@ -217,7 +209,7 @@ export default function EnrichPage() {
             <h2 className="text-sm font-semibold text-fg">
               Enriched records — {rows.length} row{rows.length === 1 ? "" : "s"}
             </h2>
-            <Btn onClick={downloadCsv}>Download enriched.csv</Btn>
+            <Btn onClick={downloadCsv}>Download Delivery Format CSV</Btn>
           </div>
           <ul className="flex flex-col gap-3">
             {rows.map((r) => (

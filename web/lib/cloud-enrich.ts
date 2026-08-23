@@ -82,20 +82,57 @@ async function geminiJson(prompt: string, system: string): Promise<any> {
   return parsed;
 }
 
-async function llmDomain(brand: string): Promise<string | null> {
-  const cached = domainCache.get(`d:${brand.toLowerCase()}`);
+async function ddgsSiteHit(domain: string, mpn: string): Promise<boolean> {
+  try {
+    const hits = await ddgsSearch(`site:${domain} ${mpn}`);
+    return hits.some(
+      (h) => registeredHost(h, domain) && h.split("?")[0].toLowerCase().includes(mpn.toLowerCase())
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * LLMs occasionally invent plausible-looking domains. Accept a proposed
+ * maker domain ONLY when a site-scoped search against it actually returns
+ * the part number; otherwise fall back to probing brand.com variants.
+ */
+async function llmDomain(brand: string, mpn?: string): Promise<string | null> {
+  const cacheKey = `d:${brand.toLowerCase()}:${mpn?.toLowerCase() ?? ""}`;
+  const cached = domainCache.get(cacheKey);
   if (cached !== undefined) return cached || null;
+
+  let proposed: string | null = null;
   try {
     const text = await geminiText(
       `Reply with ONLY the official website domain of the brand ${brand}, in the form example.com — no scheme, no path, no explanation.`
     );
     const m = /([a-z0-9-]+\.[a-z0-9.-]+)/i.exec(text.trim());
-    const domain = m ? m[1].toLowerCase().replace(/\.$/, "") : "";
-    domainCache.set(`d:${brand.toLowerCase()}`, domain);
-    return domain || null;
+    proposed = m ? m[1].toLowerCase().replace(/\.$/, "") : null;
   } catch {
-    return null;
+    proposed = null;
   }
+
+  // reject obviously non-commerce domains (game servers etc.)
+  if (proposed && /(blizzard|steam|reddit|wikipedia|youtube)\./.test(proposed)) proposed = null;
+
+  let resolved: string | null = null;
+  if (proposed && (!mpn || (await ddgsSiteHit(proposed, mpn)))) {
+    resolved = proposed;
+  } else {
+    // probe conventional patterns, validated the same strict way
+    const slug = brand.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const first = brand.toLowerCase().split(/[^a-z0-9]/)[0];
+    for (const cand of [`${slug}.com`, `${first}.com`, `${slug}tools.com`].filter(Boolean)) {
+      if (mpn ? await ddgsSiteHit(cand, mpn) : (await probeUrl(`https://${cand}`)) !== null) {
+        resolved = cand;
+        break;
+      }
+    }
+  }
+  domainCache.set(cacheKey, resolved ?? "");
+  return resolved;
 }
 
 // ---------- deterministic helpers (ported) ----------
@@ -172,9 +209,26 @@ function truncateWords(text: string, limit: number): string {
 export type CleanInput = CloudInput & { supplierName: string | null; supplierCode: string | null };
 
 export function cleanse(input: CloudInput): CleanInput {
-  const { name, code } = parseManuf(input.supplier);
+  let brandRaw = cleanBrand(input.brand);
+  let { name, code } = parseManuf(input.supplier);
+  // users often paste the supplier string ("Freud Inc (2435)") into Brand —
+  // a maker-code suffix or placeholder means it is really the supplier
+  if (brandRaw && (/\([^)]+\)$/.test(brandRaw) || !input.supplier || input.supplier === "-")) {
+    const parsedBrandSide = parseManuf(brandRaw);
+    if (!name) {
+      name = parsedBrandSide.name;
+      code = parsedBrandSide.code;
+      brandRaw = null;
+    }
+  }
   const desc = input.description.replace(/""/g, '"');
-  return { ...input, description: desc, supplierName: name || null, supplierCode: code };
+  return {
+    ...input,
+    brand: brandRaw ?? undefined,
+    description: desc,
+    supplierName: name || null,
+    supplierCode: code,
+  };
 }
 
 const DIM_Q = /(\d+(?:\.\d+)?(?:-\d+\/\d+|\/\d+)?|\d*\.?\d+(?:-\d+\/\d+|\/\d+)?)"/;
@@ -278,7 +332,7 @@ async function retrieve(
 ): Promise<Retrieval> {
   const ret: Retrieval = { domain: null, productUrl: null, refUrls: [], snippets: [], flags: [] };
   let domain: string | null = null;
-  if (llm) domain = await llmDomain(nameForDomain);
+  if (llm) domain = await llmDomain(nameForDomain, mpn);
   if (!domain) {
     // slug probes from the name itself
     const tokens = nameForDomain.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 3);
@@ -667,8 +721,9 @@ export async function enrichOne(input: CloudInput): Promise<CloudRow> {
   const assets: Record<string, string> = {};
   const brandFile = (brand ?? manufacturer ?? "").replace(/[^A-Za-z0-9]+/g, "").toUpperCase();
   const mpnFile = mpn.replace(/[^A-Za-z0-9]+/g, "").toUpperCase();
-  const mfrUrl = cleanU(retrieval.productUrl) ?? cleanU(retrieval.mfr_url ?? null);
-  if (brandFile && mpnFile && mfrUrl) {
+  const mfrUrl = cleanU(retrieval.productUrl) ?? null;
+  const hasRealRefs = retrieval.refUrls.length > 0;
+  if (brandFile && mpnFile && mfrUrl && (retrieval.productUrl || hasRealRefs)) {
     assets["MFR URL"] = mfrUrl;
     assets["Product Image"] = `${brandFile}_${mpnFile}.jpg`;
     assets["Alternate Image 1"] = `${brandFile}_${mpnFile}_1.jpg`;
@@ -680,6 +735,8 @@ export async function enrichOne(input: CloudInput): Promise<CloudRow> {
     retrieval.refUrls.slice(0, 5).forEach((u, i) => (assets[`Ref URL ${i + 1}`] = u));
   }
 
+  const emittedMfr = mfrUrl ?? cleanU(retrieval.mfr_url ?? null);
+  void emittedMfr;
   return {
     mpn,
     shortDesc: descs.short,

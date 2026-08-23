@@ -84,9 +84,14 @@ export async function POST(request: Request) {
       );
     }
 
-    void parseManuf; // supplier parsing happens inside the engine
     const rows = await enrichMany(inputs);
-    return NextResponse.json({ ok: true, count: rows.length, rows });
+    const echoes = inputs.map((i) => ({
+      mpn: i.mpn,
+      description: i.description,
+      brandRaw: i.brand ?? "",
+      supplierRaw: i.supplier ?? "",
+    }));
+    return NextResponse.json({ ok: true, count: rows.length, rows, echoes });
   } catch (e: any) {
     return NextResponse.json(
       { error: `Enrichment failed: ${e?.message?.slice(0, 200) ?? "unknown"}` },
