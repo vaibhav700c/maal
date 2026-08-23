@@ -6,6 +6,7 @@ import time
 
 from ddgs import DDGS
 from pathlib import Path
+import urllib.parse
 from urllib.parse import quote_plus
 
 import httpx
@@ -111,7 +112,8 @@ def reader_text(url: str, timeout: int = 12) -> str | None:
 def jina_ddg_urls(query: str, timeout: int = 12) -> list[str]:
     """Search results via Jina-proxied DuckDuckGo Lite (IP-block resistant).
     Decodes DDG's uddg= redirect wrappers into real target URLs."""
-    from urllib.parse import quote_plus
+    import urllib.parse
+from urllib.parse import quote_plus
 
     body = reader_text(f"https://lite.duckduckgo.com/lite/?q={quote_plus(query)}", timeout)
     if not body:
@@ -121,9 +123,7 @@ def jina_ddg_urls(query: str, timeout: int = 12) -> list[str]:
         u = raw
         uddg = re.search(r"[?&]uddg=([^&\s]+)", u)
         if uddg:
-            import urllib.parse as _up
-
-            u = _up.unquote(uddg.group(1))
+            u = urllib.parse.unquote(uddg.group(1))
         if u not in urls:
             urls.append(u)
     return urls
