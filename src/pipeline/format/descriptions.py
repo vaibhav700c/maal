@@ -52,16 +52,19 @@ def build_invoice_desc(d: DescInput) -> str:
     return _truncate_words(" ".join(parts), INVOICE_LIMIT)
 
 
+def _norm(s: str | None) -> str:
+    return (s or "").replace("®", "").replace("™", "").strip().lower()
+
+
 def _brand(d: DescInput) -> str | None:
-    brand = d.brand_display or d.manuf_name
-    return brand or None
+    return d.brand_display or d.manuf_name or None
 
 
 def build_mobile_desc(d: DescInput) -> str:
     """'{Manuf} {Brand}, {Type}, {Series}, {MPN}' per ground truth."""
     head_parts: list[str] = []
     for part in [d.manuf_name, _brand(d)]:
-        if part and part not in head_parts:
+        if part and _norm(part) not in [_norm(p) for p in head_parts]:
             head_parts.append(part)
     head = " ".join(head_parts)
     out = _join([head, d.item_type, d.series, d.mpn])
