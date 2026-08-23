@@ -1,10 +1,8 @@
-import { parseCsv } from "@/lib/artifacts";
+import { artifactBase, parseCsv } from "@/lib/artifacts";
 import fs from "node:fs";
 import path from "node:path";
 
 export const dynamic = "force-dynamic";
-
-const ROOT = process.env.MAAL_ROOT ?? path.join(process.cwd(), "..");
 
 type Row = Record<string, string>;
 
@@ -106,9 +104,10 @@ function difflibRatio(a: string, b: string): number {
 }
 
 export default function ComparePage() {
-  const expectedFile = path.join(ROOT, "input", "Unihack_ Expected Output - Delivery Format.csv");
-  const resultFile = path.join(ROOT, "output", "result.csv");
-  const sampleFile = path.join(ROOT, "input", "Unihack_ Sample Dataset - Input.csv");
+  const base = artifactBase();
+  const expectedFile = path.join(base, "expected-delivery-format.csv");
+  const resultFile = path.join(base, "result.csv");
+  const sampleFile = path.join(base, "sample-input.csv");
 
   const { headers: expectedHeaders, rows: truthRows } = readCsv(expectedFile);
   const { rows: ourRows } = readCsv(resultFile);
