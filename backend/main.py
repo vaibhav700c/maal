@@ -125,7 +125,7 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
             _merge_knowledge(extraction, knowledge_data)
             # also update brand/manufacturer with corporate names when confident
             corp = knowledge_data.get("manufacturer_corporate")
-            if corp and extraction.manufacturer in (None, "", row.supplierName):
+            if corp and extraction.manufacturer in (None, "", row.mfr_name):
                 extraction.manufacturer = corp
     except Exception:
         pass  # knowledge enrichment is opportunistic
@@ -293,7 +293,7 @@ async def _knowledge_enrich(llm, mpn: str, clean) -> dict | None:
     prompt = f"""You know industrial and consumer product catalogs. For the product:
 Model: {mpn}
 Description: {clean.part_desc}
-Supplier (may be a distributor, not the maker): {clean.supplierName or 'unknown'}
+Supplier (may be a distributor, not the maker): {clean.mfr_name or 'unknown'}
 Brand hint: {brand}
 Category: {cat_context}
 
