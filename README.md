@@ -151,3 +151,7 @@ Product data comes only from manufacturer-owned domains (site = trust 1.0,
 manufacturer-hosted PDFs = 0.9). Marketplaces and distributor sites are excluded
 and flagged. When nothing can be verified, values stay input-derived and flagged —
 never fabricated.
+
+## Live demo
+
+Hosted portal: https://maal-seven.vercel.app (precomputed snapshot; run locally for live enrichment).
