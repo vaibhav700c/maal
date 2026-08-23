@@ -73,6 +73,24 @@ runner batches rows, skips audits with no manufacturer evidence, fails over acro
 stops gracefully when every daily budget is spent; rerunning continues where it stopped. A
 daily auto-resume job ships in `deploy/com.maal.pipeline.plist`.
 
+## Architecture (production)
+
+```
+GitHub ──push──► Vercel (Next.js portal)   ──POST /enrich──►  Render (FastAPI)
+                 serves UI + snapshot data                   full Python pipeline:
+                                                             Z3 physics, Jina Reader
+                                                             retrieval, Gemini stages
+```
+
+- **Render service**: FastAPI wraps the real pipeline. Create a Web Service
+  from this repo — Build: `pip install -r backend/requirements.txt` ·
+  Start: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT` ·
+  Env: `GEMINI_API_KEY`. Copy its `*.onrender.com` URL.
+- **Vercel env**: `BACKEND_URL = <the Render URL>` (plus `GEMINI_*` optional).
+  Pushes to master auto-deploy both services.
+- Backend endpoints: `GET /health`, `POST /enrich/single`,
+  `POST /enrich/batch` (CSV ≤10 rows).
+
 ## Web console
 
 ```bash
