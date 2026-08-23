@@ -2,6 +2,9 @@
 import json
 import re
 import ssl
+import time
+
+from ddgs import DDGS
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -65,9 +68,16 @@ def is_marketplace(url: str) -> bool:
     return any(b in low for b in MARKETPLACE_BLOCKLIST)
 
 
+def registered_domain(host: str, domain: str) -> bool:
+    """True when host is `domain` itself or any subdomain of it."""
+    h = host.lower().rstrip(".")
+    d = domain.lower()
+    return h == d or h.endswith("." + d)
+
+
 def trust_tier(url: str, domain: str | None) -> float:
     host = url.split("/")[2] if "://" in url else url.split("/")[0]
-    if domain and domain.lower() in host.lower():
+    if domain and registered_domain(host, domain):
         return 0.9 if url.lower().split("?")[0].endswith(".pdf") else 1.0
     return 0.8
 
@@ -92,6 +102,30 @@ async def resolve_domain(http, mfr_name: str | None, cache: dict) -> str | None:
         if await probe_domain(http, cand):
             cache[key] = cand
             return cand
+    # Many manufacturer sites block bot probes outright. Fall back to asking
+    # the search engine: the top organic hit whose HOST contains one of the
+    # name's own tokens IS the official domain — no fetch of their servers
+    # required.
+    tokens = [
+        t
+        for t in re.split(r"[^a-z0-9]+", (mfr_name or "").lower())
+        if len(t) >= 4
+    ]
+    if tokens and mfr_name:
+        try:
+            with DDGS() as client:
+                hits = list(client.text(mfr_name, max_results=8))
+        except Exception:  # noqa: BLE001
+            hits = []
+        for hit in hits:
+            href = (hit.get("href") or hit.get("url") or "").strip()
+            if not href.startswith("http"):
+                continue
+            host = href.split("/")[2].lower()
+            host_core = ".".join(host.split(".")[-2:])  # strip www./shop.
+            if any(t in host_core for t in tokens):
+                cache[key] = host_core
+                return host_core
     cache[key] = ""
     return None
 
@@ -116,35 +150,136 @@ def snippet_windows(text: str, needle: str, width: int = 300, max_hits: int = 3)
     return out
 
 
+def _default_ddgs_fn():
+    """Real web-search backend, built lazily so tests can inject fakes."""
+    from ddgs import DDGS
+
+    def query(text: str):
+        with DDGS() as client:
+            return list(client.text(text, max_results=8))
+
+    return query
+
+
 async def search_mpn(http, ddgs_fn, domain: str, mpn: str) -> list[str]:
     """Return candidate URLs on the manufacturer domain referencing the MPN."""
     urls: list[str] = []
-    if ddgs_fn is not None:
+    if ddgs_fn is None:
         try:
-            results = ddgs_fn(f"site:{domain} {mpn}")
-            for r in results or []:
-                href = r.get("href") or r.get("url") or ""
-                if href and mpn.lower() in href.lower():
-                    urls.append(href)
-        except Exception:  # noqa: BLE001 - search flakiness must not kill pipeline
-            pass
+            ddgs_fn = _default_ddgs_fn()
+        except Exception:  # noqa: BLE001 - optional dependency at runtime
+            ddgs_fn = None
+    if ddgs_fn is not None:
+        for attempt in range(2):  # one retry: engines throttle intermittently
+            try:
+                results = ddgs_fn(f"site:{domain} {mpn}")
+                for r in results or []:
+                    href = r.get("href") or r.get("url") or ""
+                    if href and mpn.lower() in href.lower():
+                        urls.append(href)
+                if urls:
+                    break
+            except Exception:  # noqa: BLE001 - search flakiness must not kill pipeline
+                pass
+            if attempt == 0 and not urls:
+                time.sleep(2)
     if not urls:
         try:
             resp = await http.get(f"https://{domain}/search?q={quote_plus(mpn)}", timeout=10, follow_redirects=True)
             if resp.status_code == 200:
                 for match in re.findall(r'href="([^"]+)"', resp.text)[:80]:
-                    if mpn.lower() in match.lower():
+                    # require the part number in the PATH, not a query string
+                    path_only = match.split("?", 1)[0].split("#", 1)[0]
+                    if mpn.lower() in path_only.lower():
                         if match.startswith("/"):
                             match = f"https://{domain}{match}"
                         urls.append(match)
         except httpx.HTTPError:
             pass
+    if not urls:
+        # common storefront URL patterns that embed the part number directly
+        candidates = [
+            f"https://{domain}/en/p/{mpn}",
+            f"https://{domain}/p/{mpn}",
+            f"https://{domain}/product/{mpn}",
+            f"https://{domain}?s={quote_plus(mpn)}",
+            f"https://{domain}/search?query={quote_plus(mpn)}",
+        ]
+        for cand in candidates:
+            try:
+                resp = await http.head(cand, timeout=6, follow_redirects=True)
+                final = str(resp.url)
+                final_path = final.split("?", 1)[0]
+                if resp.status_code < 400 and mpn.lower() in final_path.lower():
+                    urls.append(final)
+                    break
+            except httpx.HTTPError:
+                continue
     seen, deduped = set(), []
     for u in urls:
         if u not in seen:
             seen.add(u)
             deduped.append(u)
     return deduped[:5]
+
+
+async def _retrieve(
+    name_for_domain: str | None,
+    part_num: str,
+    desc: str,
+    cache: dict,
+    http: httpx.AsyncClient,
+    ddgs_fn=None,
+) -> RetrievalResult:
+    result = RetrievalResult()
+    key = f"{name_for_domain}::{part_num}"
+    if cache.get(key):
+        cached = RetrievalResult(**cache[key])
+        has_value = (
+            cached.product_url or cached.snippets or cached.ref_urls
+        )
+        blocked = "NO_MFR_DOMAIN" in cached.flags
+        if has_value or blocked:
+            return cached  # dead entries fall through so a later run retries
+        del cache[key]
+
+    domain = await resolve_domain(http, name_for_domain, cache)
+    result.domain = domain or None
+    if domain is None:
+        result.flags.append("NO_MFR_DOMAIN")
+        return result
+    base_url = f"https://{domain}"
+    result.mfr_url = base_url
+
+    flagged_marketplace = False
+    product_page: str | None = None
+    for url in await search_mpn(http, ddgs_fn, domain, part_num):
+        if is_marketplace(url):
+            flagged_marketplace = True
+            continue
+        tier = trust_tier(url, domain)
+        if part_num.lower() in url.lower() and product_page is None:
+            product_page = url  # deep link to the exact product page
+        if tier >= 0.9 and len(result.ref_urls) < 5:
+            result.ref_urls.append(url)
+        try:
+            resp = await http.get(url, timeout=12, follow_redirects=True)
+            if resp.status_code != 200:
+                continue
+        except httpx.HTTPError:
+            continue
+        for window in snippet_windows(strip_html(resp.text), part_num):
+            result.snippets.append(Evidence(quote=window, url=url, tier=tier))
+        if len(result.snippets) >= 4:
+            break
+    result.product_url = product_page
+    if flagged_marketplace:
+        result.flags.append("MARKETPLACE_HIT_EXCLUDED")
+    if not result.snippets:
+        result.flags.append("NO_RETRIEVED_EVIDENCE")
+
+    cache[key] = result.model_dump()
+    return result
 
 
 async def retrieve_for_row(
@@ -154,47 +289,32 @@ async def retrieve_for_row(
     ddgs_fn=None,
 ) -> RetrievalResult:
     cache = cache if cache is not None else {}
-    result = RetrievalResult()
-    key = f"{row.mfr_name}::{row.mfg_part_num}"
-    if cache.get(key):
-        return RetrievalResult(**cache[key])
-
     own_client = http is None
     http = http or httpx.AsyncClient()
     try:
-        domain = await resolve_domain(http, row.mfr_name, cache)
-        result.domain = domain or None
-        if domain is None:
-            result.flags.append("NO_MFR_DOMAIN")
-            return result
-        base_url = f"https://{domain}"
-        result.mfr_url = base_url
-
-        flagged_marketplace = False
-        for url in await search_mpn(http, ddgs_fn, domain, row.mfg_part_num):
-            if is_marketplace(url):
-                flagged_marketplace = True
-                continue
-            tier = trust_tier(url, domain)
-            if tier >= 0.9 and len(result.ref_urls) < 5:
-                result.ref_urls.append(url)
-            try:
-                resp = await http.get(url, timeout=12, follow_redirects=True)
-                if resp.status_code != 200:
-                    continue
-            except httpx.HTTPError:
-                continue
-            for window in snippet_windows(strip_html(resp.text), row.mfg_part_num):
-                result.snippets.append(Evidence(quote=window, url=url, tier=tier))
-            if len(result.snippets) >= 4:
-                break
-        if flagged_marketplace:
-            result.flags.append("MARKETPLACE_HIT_EXCLUDED")
-        if not result.snippets:
-            result.flags.append("NO_RETRIEVED_EVIDENCE")
+        return await _retrieve(
+            row.mfr_name, row.mfg_part_num, row.part_desc, cache, http, ddgs_fn
+        )
     finally:
         if own_client:
             await http.aclose()
 
-    cache[key] = result.model_dump()
-    return result
+
+async def retrieve_by_brand(
+    brand: str,
+    row: CleanRow,
+    cache: dict | None = None,
+    http: httpx.AsyncClient | None = None,
+    ddgs_fn=None,
+) -> RetrievalResult:
+    """Second-pass lookup keyed by the resolved BRAND instead of the supplier."""
+    cache = cache if cache is not None else {}
+    own_client = http is None
+    http = http or httpx.AsyncClient()
+    try:
+        return await _retrieve(
+            brand, row.mfg_part_num, row.part_desc, cache, http, ddgs_fn
+        )
+    finally:
+        if own_client:
+            await http.aclose()

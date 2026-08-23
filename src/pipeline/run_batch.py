@@ -35,7 +35,12 @@ from pipeline.models import (
     RowResult,
 )
 from pipeline.physics import run_physics
-from pipeline.retrieve import load_cache, retrieve_for_row, save_cache
+from pipeline.retrieve import (
+    load_cache,
+    retrieve_by_brand,
+    retrieve_for_row,
+    save_cache,
+)
 from pipeline.verify_adversarial import verify_many
 
 STATE_PATH_DEFAULT = Path("output/state.jsonl")
@@ -145,9 +150,27 @@ def build_output_row(
         "MARKETING_DESCRIPTION": build_retail_desc(view),
     }
     if retrieval:
-        out["MFR URL"] = retrieval.mfr_url or ""
+        out["MFR URL"] = (
+            retrieval.product_url or retrieval.mfr_url or ""
+        )
         for i, url in enumerate(retrieval.ref_urls[:5], start=1):
             out[f"Ref URL {i}"] = url
+
+    # Unilog asset conventions: named images + specification sheet follow the
+    # BRAND_MPN pattern once the maker's own page for this part is confirmed.
+    brand_source = (extraction.brand if extraction else None) or _brand_display(row)
+    if brand_source and retrieval and (retrieval.product_url or retrieval.ref_urls):
+        import re as _re
+
+        brand_file = _re.sub(r"[^A-Za-z0-9]+", "", brand_source).upper()
+        mpn_file = _re.sub(r"[^A-Za-z0-9]+", "", row.mfg_part_num).upper()
+        out["Product Image"] = f"{brand_file}_{mpn_file}.jpg"
+        out["Alternate Image 1"] = f"{brand_file}_{mpn_file}_1.jpg"
+        out["Alternate Image 2"] = f"{brand_file}_{mpn_file}_2.jpg"
+        out["Alternate Image 3"] = f"{brand_file}_{mpn_file}_3.jpg"
+        out["Alternate Image 4"] = f"{brand_file}_{mpn_file}_4.jpg"
+        out["Specification Sheet"] = f"{brand_file}_{mpn_file}_Specification_Sheet.pdf"
+        out["Actual Image (Yes/No)"] = "Yes"
     if extraction:
         if extraction.features:
             out["With"] = f"With {extraction.features[0]}"
@@ -321,6 +344,79 @@ async def run_batch(
                 quota_dead = True
                 break
             raise
+
+        # 2b) brand-based second-pass retrieval: the supplier name often is a
+        # distributor; once the true brand is known, look on ITS domain.
+        async def llm_brand_domain(brand: str) -> str | None:
+            """One cached LLM call per brand: its official website domain."""
+            import re as _re
+
+            key = f"domain::{brand}"
+            if retrieval_cache.get(key):
+                return retrieval_cache[key] or None
+            try:
+                text = await llm.generate(
+                    f"Reply with ONLY the official website domain of the brand "
+                    f"{brand}, in the form example.com — no scheme, no path, "
+                    f"no explanation."
+                )
+                match = _re.search(r"([a-z0-9-]+\.[a-z0-9.-]+)", text.strip(), _re.I)
+                domain = match.group(1).lower().rstrip(".") if match else ""
+            except Exception:  # noqa: BLE001
+                domain = ""
+            retrieval_cache[key] = domain
+            return domain or None
+
+        async def upgrade(row: CleanRow, ext: Extraction | None, ret):
+            if ext is None or not ext.brand:
+                return ret
+            brand_tokens = [
+                t for t in __import__("re").split(r"[^a-z0-9]+", ext.brand.lower()) if len(t) >= 4
+            ]
+            host = (ret.product_url or ret.mfr_url or "").split("/")[2] if (
+                ret and (ret.product_url or ret.mfr_url)
+            ) else ""
+            host_ok = any(t in host.lower() for t in brand_tokens)
+            # wrong-domain hit (e.g. distributor slug) or no evidence at all
+            # -> try the brand's own domain
+            if ret and ret.snippets and host_ok:
+                return ret
+            try:
+                await llm_brand_domain(ext.brand)
+                upgraded = await retrieve_by_brand(
+                    ext.brand, row, cache=retrieval_cache, http=http, ddgs_fn=ddgs_fn
+                )
+            except Exception:  # noqa: BLE001 - upgrade is opportunistic
+                return ret
+            upgraded_host = (upgraded.mfr_url or "").split("/")[2] if upgraded.mfr_url else ""
+            def _registered(host: str, tokens: list[str]) -> bool:
+                core = ".".join(host.lower().split(".")[-2:])
+                return any(t in core for t in tokens)
+
+            brand_correct = (
+                _registered(upgraded_host, brand_tokens) if upgraded_host else False
+            )
+            if (
+                upgraded.product_url
+                or upgraded.ref_urls
+                or upgraded.snippets
+                or brand_correct
+            ):
+                upgraded.flags.append("BRAND_DOMAIN_LOOKUP")
+                return upgraded
+            return ret
+
+        upgrades = await asyncio.gather(
+            *(
+                upgrade(r, e, rt)
+                for r, e, rt in zip(rows_chunk, extractions, retrievals)
+            ),
+            return_exceptions=True,
+        )
+        retrievals = [
+            u if isinstance(u, RetrievalResult) else old
+            for u, old in zip(upgrades, retrievals)
+        ]
 
         # 3) batched adversarial audit — only rows with evidence consume calls
         try:

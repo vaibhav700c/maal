@@ -238,6 +238,38 @@ export default async function RowPage({
           </div>
 
           <div className="rounded-[3px] border border-line bg-panel p-4">
+            <h2 className="mb-3 font-mono text-[10px] uppercase tracking-wider text-ink2">
+              Assets &amp; documents
+            </h2>
+            <dl className="flex flex-col gap-2 font-mono text-[11px]">
+              {[
+                ["MFR URL", csvRow["MFR URL"]],
+                ["Product Image", csvRow["Product Image"]],
+                ["Specification Sheet", csvRow["Specification Sheet"]],
+                ["Actual Image", csvRow["Actual Image (Yes/No)"]],
+                ["Ref URL 1", csvRow["Ref URL 1"]],
+                ["Ref URL 2", csvRow["Ref URL 2"]],
+                ["Ref URL 3", csvRow["Ref URL 3"]],
+              ]
+                .filter(([, v]) => v)
+                .map(([k, v]) => (
+                  <div key={k as string} className="grid grid-cols-[110px_1fr] gap-2">
+                    <dt className="text-ink2">{k}</dt>
+                    <dd className="break-all">
+                      {String(v).startsWith("http") ? (
+                        <a href={String(v)} target="_blank" rel="noreferrer" className="text-accent underline decoration-accent/40 underline-offset-4 hover:decoration-accent">
+                          {String(v).length > 52 ? `${String(v).slice(0, 52)}…` : v}
+                        </a>
+                      ) : (
+                        v
+                      )}
+                    </dd>
+                  </div>
+                ))}
+            </dl>
+          </div>
+
+          <div className="rounded-[3px] border border-line bg-panel p-4">
             <CorrectionsForm mpn={record.mfg_part_num} attributes={attrOptions} />
           </div>
         </div>

@@ -58,6 +58,7 @@ class Extraction(BaseModel):
 class RetrievalResult(BaseModel):
     domain: str | None = None
     mfr_url: str | None = None
+    product_url: str | None = None  # deep link to the exact product page
     ref_urls: list[str] = Field(default_factory=list)
     snippets: list[Evidence] = Field(default_factory=list)
     flags: list[str] = Field(default_factory=list)
