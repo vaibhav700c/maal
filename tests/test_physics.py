@@ -60,6 +60,32 @@ def test_diameter_gt_arbor_unsat():
     assert set(check.fields) == {"Diameter", "Arbor"}
 
 
+def test_diameter_gt_arbor_normalizes_mixed_units_to_sat():
+    # 12 in diameter vs 20 mm arbor: 12 in = 304.8 mm, comfortably larger.
+    # Comparing the raw numbers (12 vs 20) without unit conversion used to
+    # produce a false-positive UNSAT; normalized to inches this is SAT.
+    extraction = Extraction(
+        item_type="Cut Off Disc",
+        attributes=_attrs(("Diameter", 12, "in"), ("Arbor", 20, "mm")),
+    )
+    report = run_physics(extraction)
+    check = next(c for c in report.checks if c.name == "diameter_gt_arbor")
+    assert check.status == "SAT"
+
+
+def test_diameter_gt_arbor_mixed_units_still_catches_real_violation():
+    # 10 mm diameter (~0.39 in) vs 1 in arbor: a genuine violation that must
+    # still fire once values are compared in a common unit.
+    extraction = Extraction(
+        item_type="Cut Off Disc",
+        attributes=_attrs(("Diameter", 10, "mm"), ("Arbor", 1, "in")),
+    )
+    report = run_physics(extraction)
+    check = next(c for c in report.checks if c.name == "diameter_gt_arbor")
+    assert check.status == "UNSAT"
+    assert set(check.fields) == {"Diameter", "Arbor"}
+
+
 def test_id_lt_od_unsat():
     extraction = Extraction(
         item_type="Bearing",

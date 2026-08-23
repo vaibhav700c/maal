@@ -1,4 +1,5 @@
 import { artifactBase, parseCsv } from "@/lib/artifacts";
+import { Card, PageTitle, Stat } from "@/components/ui";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -68,7 +69,7 @@ function compareRow(expected: Row, actual: Row): FieldVerdict[] {
 function similarity(a: string, b: string): number {
   const la = a.toLowerCase().replace(/[®™]/g, "");
   const lb = b.toLowerCase().replace(/[®™]/g, "");
-  // token-overlap blend with sequence ratio — forgiving of word order
+  // token-overlap blend with sequence ratio, forgiving of word order
   const at = new Set(la.split(/[\s,>]+/).filter(Boolean));
   const bt = new Set(lb.split(/[\s,>]+/).filter(Boolean));
   let overlap = 0;
@@ -141,119 +142,110 @@ export default function ComparePage() {
   const totalScored = replays.reduce((a, r) => a + r.scoredCount, 0);
 
   return (
-    <section className="mx-auto max-w-4xl">
-      <h1 className="font-sans text-lg font-bold">Ground-truth comparison</h1>
-      <p className="mt-1 max-w-2xl text-sm text-ink2">
-        Our generated catalog checked against the two fully-enriched example rows
-        shipped in the Delivery Format file — plus strict header fidelity across
-        all 252 required columns.
-      </p>
+    <section className="mx-auto flex max-w-4xl flex-col gap-6">
+      <PageTitle
+        title="Compare"
+        sub="Our generated catalog checked against the two fully enriched example rows shipped in the Delivery Format file, plus strict header fidelity across all 252 required columns."
+      />
 
-      {/* Summary cards */}
-      <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard
-          tone={headerMatch ? "ok" : "bad"}
-          value={headerMatch ? "252 / 252" : "MISMATCH"}
-          label="Header fidelity"
-        />
-        <StatCard value={String(sampleRows)} label="Sample dataset rows wired" />
-        <StatCard value={String(ourRows.length)} label="Rows enriched" />
-        <StatCard
-          tone={totalExact / Math.max(1, totalScored) >= 0.5 ? "ok" : "warn"}
-          value={`${totalExact} / ${totalScored}`}
-          label="Fields exactly matching ground truth"
-        />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Card>
+          <Stat
+            tone={headerMatch ? "ok" : "bad"}
+            value={headerMatch ? "252/252" : "MISMATCH"}
+            label="Header fidelity"
+          />
+        </Card>
+        <Card>
+          <Stat value={String(sampleRows)} label="Sample dataset rows wired" />
+        </Card>
+        <Card>
+          <Stat value={String(ourRows.length)} label="Rows enriched" />
+        </Card>
+        <Card>
+          <Stat
+            tone={totalExact / Math.max(1, totalScored) >= 0.5 ? "ok" : "warn"}
+            value={`${totalExact}/${totalScored}`}
+            label="Fields exactly matching ground truth"
+          />
+        </Card>
       </div>
 
-      {/* Wiring */}
-      <div className="mt-6 rounded-[3px] border border-line bg-panel p-4">
-        <h2 className="font-mono text-[10px] uppercase tracking-wider text-ink2">
+      <Card>
+        <h2 className="font-display text-xl font-semibold tracking-tight text-fg">
           Input folder wiring
         </h2>
-        <ul className="mt-2 flex flex-col gap-1 font-mono text-xs">
-          <li className="flex justify-between gap-4">
+        <ul className="mt-3 flex flex-col gap-1.5 font-mono text-xs text-fg-dim">
+          <li className="flex flex-wrap justify-between gap-4">
             <span>input/Unihack_ Sample Dataset - Input.csv</span>
-            <span className="text-ink2">
-              {sampleRows} rows → pipeline input (catalog runs)
-            </span>
+            <span>{sampleRows} rows into pipeline input.</span>
           </li>
-          <li className="flex justify-between gap-4">
+          <li className="flex flex-wrap justify-between gap-4">
             <span>input/Unihack_ Expected Output - Delivery Format.csv</span>
-            <span className="text-ink2">
-              {expectedHeaders.length} headers → emit writer + this comparison
-            </span>
+            <span>{expectedHeaders.length} headers into the emit writer and this comparison.</span>
           </li>
         </ul>
-      </div>
+      </Card>
 
       {/* Replay tables */}
       {replays.map((r) => (
-        <div key={r.mpn} className="mt-6 rounded-[3px] border border-line bg-panel">
-          <div className="flex items-center justify-between border-b border-line px-4 py-2">
-            <h2 className="font-mono text-sm font-semibold">{r.mpn}</h2>
-            <span className="font-mono text-[11px] text-ink2">
-              {r.exact}/{r.scoredCount} exact · avg match {(r.meanSim * 100).toFixed(0)}%
+        <Card key={r.mpn} className="p-0">
+          <div className="flex items-center justify-between border-b border-line px-4 py-3">
+            <h2 className="font-mono text-sm font-semibold text-fg">{r.mpn}</h2>
+            <span className="font-mono text-[11px] text-fg-dim">
+              {r.exact}/{r.scoredCount} exact, avg match {(r.meanSim * 100).toFixed(0)}%
             </span>
           </div>
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-line font-mono text-[10px] uppercase tracking-wider text-ink2">
-                <th className="px-4 py-2 font-medium">Field</th>
-                <th className="px-4 py-2 font-medium">Verdict</th>
-                <th className="px-4 py-2 font-medium">Expected</th>
-                <th className="px-4 py-2 font-medium">Ours</th>
-              </tr>
-            </thead>
-            <tbody>
-              {r.fields.map((f) => (
-                <tr key={f.label} className="border-b border-line last:border-b-0 align-top">
-                  <td className="whitespace-nowrap px-4 py-2 text-ink2">{f.label}</td>
-                  <td className="px-4 py-2">
-                    <FieldBadge v={f} />
-                  </td>
-                  <td className="max-w-[16rem] px-4 py-2">{f.expected || "—"}</td>
-                  <td className="max-w-[16rem] px-4 py-2">{f.actual || "—"}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-left text-xs">
+              <thead>
+                <tr className="border-b border-line text-xs text-fg-faint">
+                  <th className="px-4 py-2 font-medium">Field</th>
+                  <th className="px-4 py-2 font-medium">Verdict</th>
+                  <th className="px-4 py-2 font-medium">Expected</th>
+                  <th className="px-4 py-2 font-medium">Ours</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {r.fields.map((f) => {
+                  const changed = f.status !== "EXACT" && f.status !== "NOT_SCORED";
+                  return (
+                    <tr key={f.label} className="align-top">
+                      <td className="whitespace-nowrap px-4 py-2 text-fg-dim">{f.label}</td>
+                      <td className="px-4 py-2">
+                        <FieldBadge v={f} />
+                      </td>
+                      <td
+                        className={`max-w-[16rem] px-4 py-2 font-mono text-[13px] ${
+                          changed ? "bg-accent/8 text-fg" : "text-fg-dim"
+                        }`}
+                      >
+                        {f.expected || "none"}
+                      </td>
+                      <td
+                        className={`max-w-[16rem] px-4 py-2 font-mono text-[13px] ${
+                          changed ? "bg-accent/8 text-fg" : "text-fg-dim"
+                        }`}
+                      >
+                        {f.actual || "none"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
       ))}
 
-      <p className="mt-4 max-w-3xl text-xs leading-relaxed text-ink2">
-        Reading the verdicts: EXACT means identical after trademark-symbol and
-        case normalization. EXTRA marks values we populate where the ground
-        truth ships blanks (the Delivery Format file intentionally leaves some
-        UNSPSC cells empty) — enrichment beyond the reference, not an error.
-        PARTIAL reflects wording differences such as series names that live in
-        manufacturer marketing copy rather than the terse input row.
+      <p className="max-w-3xl text-xs leading-relaxed text-fg-dim">
+        Reading the verdicts. EXACT means identical after trademark symbol and case
+        normalization. EXTRA marks values we populate where the ground truth ships blanks,
+        since the Delivery Format file intentionally leaves some UNSPSC cells empty: enrichment
+        beyond the reference, not an error. PARTIAL reflects wording differences such as series
+        names that live in manufacturer marketing copy rather than the terse input row.
       </p>
     </section>
-  );
-}
-
-function StatCard({
-  value,
-  label,
-  tone = "neutral",
-}: {
-  value: string;
-  label: string;
-  tone?: "neutral" | "ok" | "bad" | "warn";
-}) {
-  const tones = {
-    neutral: "border-line",
-    ok: "border-ok/40",
-    bad: "border-bad/40",
-    warn: "border-warn/40",
-  } as const;
-  return (
-    <div className={`rounded-[3px] border bg-panel px-4 py-3 ${tones[tone]}`}>
-      <div className="font-mono text-lg font-semibold">{value}</div>
-      <div className="mt-0.5 font-mono text-[10px] uppercase tracking-wide text-ink2">
-        {label}
-      </div>
-    </div>
   );
 }
 
@@ -261,14 +253,14 @@ function FieldBadge({ v }: { v: FieldVerdict }) {
   const map = {
     EXACT: "border-ok/40 bg-ok/5 text-ok",
     PARTIAL: "border-warn/40 bg-warn/5 text-warn",
-    EXTRA: "border-line text-ink2",
+    EXTRA: "border-line text-fg-dim",
     MISSING: "border-bad/40 bg-bad/5 text-bad",
-    NOT_SCORED: "border-line text-ink2",
+    NOT_SCORED: "border-line text-fg-dim",
   } as const;
   const suffix =
     v.status === "PARTIAL" ? ` ${(v.similarity * 100).toFixed(0)}%` : "";
   return (
-    <span className={`inline-block whitespace-nowrap rounded-[3px] border px-1.5 py-0.5 font-mono text-[10px] uppercase ${map[v.status]}`}>
+    <span className={`inline-block whitespace-nowrap rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide ${map[v.status]}`}>
       {v.status}
       {suffix}
     </span>

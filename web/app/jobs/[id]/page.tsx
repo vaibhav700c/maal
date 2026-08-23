@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Chip } from "@/components/ui";
+import { Btn, Card, Chip, Empty } from "@/components/ui";
 
 type JobStatus = {
   id: string;
@@ -60,6 +60,14 @@ const DESCRIPTIONS: Array<[string, keyof RowResult]> = [
   ["Retail description", "retailDesc"],
 ];
 
+const STATUS_TONE: Record<JobStatus["status"], string> = {
+  QUEUED: "text-fg-dim",
+  RUNNING: "text-accent",
+  DONE: "text-ok",
+  FAILED: "text-bad",
+  CANCELLED: "text-fg-dim",
+};
+
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -74,7 +82,7 @@ function CopyButton({ text }: { text: string }) {
           () => undefined
         );
       }}
-      className="font-mono text-[10px] text-ink2 underline decoration-line underline-offset-4 hover:text-ink"
+      className="font-mono text-[10px] text-fg-dim underline decoration-line underline-offset-4 transition-colors duration-150 ease-out hover:text-fg focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
     >
       {copied ? "copied" : "copy"}
     </button>
@@ -87,7 +95,7 @@ function Url({ v, max = 80 }: { v: string; max?: number }) {
       href={v}
       target="_blank"
       rel="noreferrer"
-      className="break-all text-accent underline decoration-accent/40 underline-offset-4 hover:decoration-accent"
+      className="break-all text-accent underline decoration-accent/40 underline-offset-4 transition-colors duration-150 ease-out hover:decoration-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
     >
       {v.length > max ? `${v.slice(0, max)}…` : v}
     </a>
@@ -99,14 +107,13 @@ function AssetBlock({ row }: { row: RowResult }) {
   const extraRefs = (row.retrieval?.refUrls ?? [])
     .filter((u) => !Object.values(row.assets).includes(u))
     .slice(0, 3);
-  const nothing = entries.length === 0 && extraRefs.length === 0;
   return (
-    <dl className="mt-3 flex flex-col gap-1 rounded-[3px] border border-line bg-paper p-3 font-mono text-[11px]">
+    <dl className="mt-3 flex flex-col gap-1 rounded-md border border-line bg-surface-2 p-3 font-mono text-[11px]">
       {entries
         .filter(([k]) => k === "MFR URL")
         .map(([k, v]) => (
           <div key={k} className="grid grid-cols-[120px_1fr] gap-2">
-            <dt className="text-ink2">{k}</dt>
+            <dt className="text-fg-dim">{k}</dt>
             <dd className="break-all">
               <Url v={v} max={90} />
             </dd>
@@ -114,7 +121,7 @@ function AssetBlock({ row }: { row: RowResult }) {
         ))}
       {extraRefs.map((u) => (
         <div key={u} className="grid grid-cols-[120px_1fr] gap-2">
-          <dt className="text-ink2">source doc</dt>
+          <dt className="text-fg-dim">source doc</dt>
           <dd className="break-all">
             <Url v={u} max={80} />
           </dd>
@@ -124,7 +131,7 @@ function AssetBlock({ row }: { row: RowResult }) {
         .filter(([k]) => k !== "MFR URL")
         .map(([k, v]) => (
           <div key={k} className="grid grid-cols-[120px_1fr] gap-2">
-            <dt className="text-ink2">{k}</dt>
+            <dt className="text-fg-dim">{k}</dt>
             <dd className="break-all">
               {v.startsWith("http") ? <Url v={v} max={90} /> : v}
             </dd>
@@ -132,15 +139,14 @@ function AssetBlock({ row }: { row: RowResult }) {
         ))}
       {!row.assets["MFR URL"] && (
         <div className="grid grid-cols-[120px_1fr] gap-2">
-          <dt className="text-ink2">MFR URL</dt>
+          <dt className="text-fg-dim">MFR URL</dt>
           <dd className="text-warn">
-            not found —{" "}
+            Not found.{" "}
             {(row.retrieval?.flags ?? []).join(", ") ||
-              "no manufacturer page located for this part"}
+              "No manufacturer page located for this part."}
           </dd>
         </div>
       )}
-      {nothing && null}
     </dl>
   );
 }
@@ -149,10 +155,10 @@ function RecordCard({ row }: { row: RowResult }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <li className="rounded-[3px] border border-line bg-panel">
+    <li className="rounded-xl border border-line bg-surface">
       <div className="p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="font-mono text-sm font-semibold">{row.mpn}</span>
+          <span className="font-mono text-sm font-semibold text-fg">{row.mpn}</span>
           <div className="flex items-center gap-2">
             {row.flags.includes("PHYSICS_VIOLATION") && (
               <Chip tone="bad">physics fail</Chip>
@@ -162,8 +168,8 @@ function RecordCard({ row }: { row: RowResult }) {
             </Chip>
           </div>
         </div>
-        {row.shortDesc && <p className="mt-1.5 text-sm">{row.shortDesc}</p>}
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-ink2">
+        {row.shortDesc && <p className="mt-1.5 text-sm text-fg">{row.shortDesc}</p>}
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-fg-dim">
           {row.brand && <span>brand {row.brand}</span>}
           {row.manufacturer && <span>mfr {row.manufacturer}</span>}
           {row.classpath && (
@@ -177,18 +183,16 @@ function RecordCard({ row }: { row: RowResult }) {
         <button
           type="button"
           onClick={() => setOpen(!open)}
-          className="mt-3 font-mono text-[11px] text-accent underline decoration-accent/40 underline-offset-4 hover:decoration-accent"
+          className="mt-3 font-mono text-[11px] text-accent underline decoration-accent/40 underline-offset-4 transition-colors duration-150 ease-out hover:decoration-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
         >
           {open
-            ? "▲ hide full record"
-            : "▼ full record — descriptions, attributes, provenance, physics"}
+            ? "Hide full record"
+            : "Show full record: descriptions, attributes, provenance, physics"}
         </button>
 
         {open && (
           <div className="mt-3 border-t border-line pt-3">
-            <h4 className="font-mono text-[10px] uppercase tracking-wider text-ink2">
-              Five descriptions
-            </h4>
+            <h4 className="text-sm font-semibold text-fg">Five descriptions</h4>
             <div className="mt-1.5 flex flex-col gap-1.5">
               {DESCRIPTIONS.map(([label, key]) => {
                 const value = String(row[key] ?? "");
@@ -197,99 +201,102 @@ function RecordCard({ row }: { row: RowResult }) {
                     key={label}
                     className="grid grid-cols-[130px_1fr_auto] items-start gap-3"
                   >
-                    <span className="pt-0.5 font-mono text-[10px] uppercase text-ink2">
+                    <span className="pt-0.5 text-xs text-fg-faint">
                       {label}
                     </span>
-                    <span className="text-xs leading-snug">{value || "—"}</span>
+                    <span className="font-mono text-xs leading-snug text-fg">{value || "none"}</span>
                     {value && <CopyButton text={value} />}
                   </div>
                 );
               })}
             </div>
 
-            <h4 className="mt-4 font-mono text-[10px] uppercase tracking-wider text-ink2">
-              Attribute ledger — every value with its proof
+            <h4 className="mt-4 text-sm font-semibold text-fg">
+              Attribute ledger. Every value with its proof.
             </h4>
             {row.attributes.length === 0 ? (
-              <p className="mt-1 text-xs text-ink2">
+              <p className="mt-1 text-xs text-fg-dim">
                 No attributes could be verified for this part.
               </p>
             ) : (
-              <table className="mt-1.5 w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-line font-mono text-[10px] uppercase text-ink2">
-                    <th className="py-1.5 pr-3 font-medium">Attribute</th>
-                    <th className="py-1.5 pr-3 font-medium">Value</th>
-                    <th className="py-1.5 pr-3 font-medium">Verdict</th>
-                    <th className="py-1.5 font-medium">Evidence</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {row.attributes.map((a) => (
-                    <tr
-                      key={a.label}
-                      className="border-b border-line last:border-b-0 align-top"
-                    >
-                      <td className="py-1.5 pr-3 text-ink2">{a.label}</td>
-                      <td className="py-1.5 pr-3 font-mono">
-                        {a.value}
-                        {a.uom ? ` ${a.uom}` : ""}
-                      </td>
-                      <td className="whitespace-nowrap py-1.5 pr-3">
-                        <Chip
-                          tone={
-                            a.verdict === "CONFIRMED"
-                              ? "ok"
-                              : a.verdict === "REFUTED"
-                                ? "bad"
-                                : "warn"
-                          }
-                        >
-                          {(a.verdict ?? "—").replace("_", " ")} ·{" "}
-                          {(a.confidence ?? 0).toFixed(2)}
-                        </Chip>
-                        {a.reviewReason && (
-                          <div className="mt-0.5 max-w-[220px] text-bad/80">
-                            {a.reviewReason}
-                          </div>
-                        )}
-                      </td>
-                      <td className="py-1.5">
-                        {a.url ? (
-                          <Url v={a.url} max={60} />
-                        ) : (
-                          <span className="text-ink2">input row</span>
-                        )}
-                        {a.quote && (
-                          <details className="mt-0.5">
-                            <summary className="cursor-pointer select-none text-ink2 hover:text-ink">
-                              quote
-                            </summary>
-                            <blockquote className="mt-0.5 border-l-2 border-line pl-2 text-ink2">
-                              {a.quote.slice(0, 300)}
-                            </blockquote>
-                          </details>
-                        )}
-                      </td>
+              <div className="mt-1.5 overflow-x-auto">
+                <table className="w-full min-w-[600px] text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-line text-xs text-fg-faint">
+                      <th className="py-1.5 pr-3 font-medium">Attribute</th>
+                      <th className="py-1.5 pr-3 font-medium">Value</th>
+                      <th className="py-1.5 pr-3 font-medium">Verdict</th>
+                      <th className="py-1.5 font-medium">Evidence</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-line">
+                    {row.attributes.map((a) => (
+                      <tr key={a.label} className="align-top">
+                        <td className="py-1.5 pr-3 text-fg-dim">{a.label}</td>
+                        <td className="py-1.5 pr-3 font-mono text-fg">
+                          {a.value}
+                          {a.uom ? ` ${a.uom}` : ""}
+                        </td>
+                        <td className="whitespace-nowrap py-1.5 pr-3">
+                          <Chip
+                            tone={
+                              a.verdict === "CONFIRMED"
+                                ? "ok"
+                                : a.verdict === "REFUTED"
+                                  ? "bad"
+                                  : "warn"
+                            }
+                          >
+                            {(a.verdict ?? "none").replace("_", " ")} ·{" "}
+                            {(a.confidence ?? 0).toFixed(2)}
+                          </Chip>
+                          {a.reviewReason && (
+                            <div className="mt-0.5 max-w-[220px] text-bad/80">
+                              {a.reviewReason}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-1.5">
+                          {a.url ? (
+                            <Url v={a.url} max={60} />
+                          ) : (
+                            <span className="text-fg-dim">input row</span>
+                          )}
+                          {a.quote && (
+                            <details className="mt-0.5 rounded-md border border-line bg-surface-2 open:pb-1.5">
+                              <summary className="cursor-pointer select-none px-2 py-1 text-fg-dim transition-colors duration-150 ease-out hover:text-fg">
+                                quote
+                              </summary>
+                              <blockquote className="mx-2 border-l-2 border-line pl-2 text-fg-dim">
+                                {a.quote.slice(0, 300)}
+                              </blockquote>
+                            </details>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
 
             {row.physics && row.physics.length > 0 && (
               <>
-                <h4 className="mt-4 font-mono text-[10px] uppercase tracking-wider text-ink2">
-                  Z3 physics dossier
-                </h4>
-                <ul className="mt-1.5 flex flex-col gap-1">
+                <h4 className="mt-4 text-sm font-semibold text-fg">Z3 physics dossier</h4>
+                <ul className="mt-1.5 flex flex-col gap-1.5">
                   {row.physics.map((c) => (
-                    <li key={c.name} className="flex items-start justify-between gap-3 text-xs">
-                      <span className="font-mono">{c.name}</span>
-                      <span className="flex items-center gap-2">
-                        {c.reason && (
-                          <span className="max-w-md text-bad/90">{c.reason}</span>
-                        )}
+                    <li
+                      key={c.name}
+                      className={`rounded-md border-l-4 bg-surface-2 px-3 py-1.5 text-xs ${
+                        c.status === "UNSAT"
+                          ? "border-bad"
+                          : c.status === "SAT"
+                            ? "border-ok"
+                            : "border-line-2"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-mono">{c.name}</span>
                         <Chip
                           tone={
                             c.status === "SAT"
@@ -301,7 +308,10 @@ function RecordCard({ row }: { row: RowResult }) {
                         >
                           {c.status}
                         </Chip>
-                      </span>
+                      </div>
+                      {c.reason && (
+                        <p className="mt-1 text-fg-dim">{c.reason}</p>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -357,65 +367,62 @@ export default function JobPage() {
 
   if (error) {
     return (
-      <section className="mx-auto max-w-xl border border-line bg-panel p-8">
-        <h1 className="font-sans text-base font-semibold">{error}</h1>
-        <Link
-          href="/enrich"
-          className="mt-4 inline-block font-mono text-xs text-accent underline underline-offset-4"
-        >
-          ← Start another enrichment
-        </Link>
+      <section className="mx-auto max-w-xl">
+        <Empty
+          title={error}
+          hint="Start a new enrichment job from Enrich."
+          action={<Btn href="/enrich">Enrich products</Btn>}
+        />
       </section>
     );
   }
 
   if (!job) {
-    return <p className="font-mono text-xs text-ink2">Loading job…</p>;
+    return <p className="font-mono text-xs text-fg-dim">Loading job…</p>;
   }
 
   const pct =
     job.inputRows > 0 ? Math.round((job.processed / job.inputRows) * 100) : 0;
   const done = job.status !== "RUNNING" && job.status !== "QUEUED";
+  const barTone =
+    job.status === "RUNNING"
+      ? "bg-accent"
+      : job.status === "FAILED"
+        ? "bg-bad"
+        : done
+          ? "bg-ok"
+          : "bg-line-2";
 
   return (
-    <section className="mx-auto max-w-3xl">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <section className="mx-auto flex max-w-3xl flex-col gap-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <Link
             href="/enrich"
-            className="font-mono text-xs text-ink2 underline decoration-line underline-offset-4 hover:text-ink"
+            className="font-mono text-xs text-fg-dim underline decoration-line underline-offset-4 transition-colors duration-150 ease-out hover:text-fg focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
           >
             ← Enrich more products
           </Link>
-          <h1 className="mt-2 truncate font-mono text-lg font-semibold">
+          <h1 className="mt-2 truncate font-display text-2xl font-extrabold tracking-tight text-fg">
             {job.name}
           </h1>
         </div>
-        <span
-          className={`font-mono text-sm font-semibold ${
-            job.status === "RUNNING"
-              ? "text-accent"
-              : job.status === "DONE"
-                ? "text-ok"
-                : job.status === "FAILED"
-                  ? "text-bad"
-                  : "text-ink2"
-          }`}
-        >
+        <span className={`inline-flex items-center gap-2 font-mono text-sm font-semibold ${STATUS_TONE[job.status]}`}>
+          {job.status === "RUNNING" && (
+            <span className="pulse-dot h-2 w-2 rounded-full bg-accent" aria-hidden="true" />
+          )}
           {job.status}
         </span>
       </div>
 
-      <div className="mt-4 rounded-[3px] border border-line bg-panel p-4">
+      <Card>
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-line">
           <div
-            className={`h-full transition-all ${
-              job.status === "RUNNING" ? "animate-pulse bg-accent" : done ? "bg-ok" : ""
-            }`}
+            className={`h-full transition-[width] duration-500 ease-out ${barTone}`}
             style={{ width: `${done ? 100 : Math.max(pct, 4)}%` }}
           />
         </div>
-        <div className="mt-2 flex justify-between font-mono text-[11px] text-ink2">
+        <div className="mt-2 flex flex-wrap justify-between gap-2 font-mono text-[11px] text-fg-dim">
           <span>
             {job.processed} / {job.inputRows} rows
           </span>
@@ -426,46 +433,41 @@ export default function JobPage() {
           )}
         </div>
         {job.error && <p className="mt-2 text-sm text-bad">{job.error}</p>}
-      </div>
+      </Card>
 
       {done && results && results.length === 0 && (
-        <p className="mt-6 rounded-[3px] border border-line bg-panel p-5 text-sm text-ink2">
-          The run completed but produced no enriched records. Check the run log
-          for quota or input-format issues.
-        </p>
+        <Empty
+          title="Run completed with no enriched records"
+          hint="Check the run log for quota or input-format issues, then try again from Enrich."
+          action={<Btn href="/enrich">Enrich products</Btn>}
+        />
       )}
 
-      {done && results && (
+      {done && results && results.length > 0 && (
         <>
-          <div className="mt-5 flex flex-wrap gap-3">
-            <a
-              href={`/api/download/result.csv?job=${job.id}`}
-              className="rounded-[3px] bg-accent px-4 py-2 font-mono text-xs font-semibold text-white hover:bg-accent/90"
-            >
-              Download result.csv
-            </a>
-            <a
-              href={`/api/download/result.xlsx?job=${job.id}`}
-              className="rounded-[3px] border border-line bg-panel px-4 py-2 font-mono text-xs font-semibold hover:border-ink"
-            >
+          <div className="flex flex-wrap gap-3">
+            <Btn href={`/api/download/result.csv?job=${job.id}`}>result.csv</Btn>
+            <Btn variant="ghost" href={`/api/download/result.xlsx?job=${job.id}`}>
               result.xlsx
-            </a>
-            <a
-              href={`/api/download/sidecar.jsonl?job=${job.id}`}
-              className="rounded-[3px] border border-line bg-panel px-4 py-2 font-mono text-xs font-semibold hover:border-ink"
-            >
+            </Btn>
+            <Btn variant="ghost" href={`/api/download/sidecar.jsonl?job=${job.id}`}>
               sidecar.jsonl (provenance)
-            </a>
+            </Btn>
           </div>
 
-          <h2 className="mt-6 font-mono text-[10px] uppercase tracking-wider text-ink2">
-            Enriched records — expand for the full verified record
-          </h2>
-          <ul className="mt-2 flex flex-col gap-3">
-            {results.map((r) => (
-              <RecordCard key={r.mpn} row={r} />
-            ))}
-          </ul>
+          <div>
+            <h2 className="font-display text-xl font-semibold tracking-tight text-fg">
+              Enriched records
+            </h2>
+            <p className="mt-1 text-xs text-fg-faint">
+              Expand a record for the full verified record.
+            </p>
+            <ul className="mt-3 flex flex-col gap-3">
+              {results.map((r) => (
+                <RecordCard key={r.mpn} row={r} />
+              ))}
+            </ul>
+          </div>
         </>
       )}
     </section>

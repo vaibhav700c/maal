@@ -56,8 +56,19 @@ def _attr_map(extraction: Extraction) -> dict[str, tuple[float, str | None]]:
     for attr in extraction.attributes:
         parsed = parse_qty(attr.value)
         if parsed is not None:
-            out[attr.label] = parsed
+            value, uom = parsed
+            out[attr.label] = (value, uom or attr.uom)
     return out
+
+
+# Length-unit normalization for cross-dimension comparisons (e.g. a diameter
+# given in inches vs. an arbor given in millimeters). Values with no uom, or
+# an unrecognized one, are assumed to already be inches.
+_LENGTH_TO_IN = {"in": 1.0, "mm": 1.0 / 25.4, "ft": 12.0}
+
+
+def _length_in(value: float, uom: str | None) -> float:
+    return value * _LENGTH_TO_IN.get((uom or "in").lower(), 1.0)
 
 
 def _check(name: str, status: str, fields=None, reason=None) -> PhysicsCheck:
@@ -103,35 +114,44 @@ def check_diameter_gt_arbor(attrs: dict[str, tuple[float, str | None]]) -> Physi
         (("Blade Diameter",), ("Arbor", "Arbor Size", "Bore")),
     ]
     for dia_names, bore_names in pairs:
-        dia = next((attrs[n][0] for n in dia_names if n in attrs), None)
-        bore = next((attrs[n][0] for n in bore_names if n in attrs), None)
-        if dia is None or bore is None or dia == bore:
+        dia_raw = next((attrs[n] for n in dia_names if n in attrs), None)
+        bore_raw = next((attrs[n] for n in bore_names if n in attrs), None)
+        if dia_raw is None or bore_raw is None:
             continue
+        dia = _length_in(*dia_raw)
+        bore = _length_in(*bore_raw)
+        if dia == bore:
+            continue
+        fields = [n for n in list(dia_names) + list(bore_names) if n in attrs]
         if dia <= bore:
             return _check(
                 "diameter_gt_arbor",
                 "UNSAT",
-                [n for n in list(dia_names) + list(bore_names) if n in attrs],
-                f"disc/blade diameter {dia:g} must be larger than the arbor/bore {bore:g}",
+                fields,
+                f"disc/blade diameter {dia_raw[0]:g}{dia_raw[1] or 'in'} must be larger than "
+                f"the arbor/bore {bore_raw[0]:g}{bore_raw[1] or 'in'} "
+                f"({dia:g} in vs {bore:g} in)",
             )
-        return _check(
-            "diameter_gt_arbor", "SAT", [n for n in list(dia_names) + list(bore_names) if n in attrs]
-        )
+        return _check("diameter_gt_arbor", "SAT", fields)
     return _check("diameter_gt_arbor", "SKIPPED")
 
 
 def check_id_lt_od(attrs: dict[str, tuple[float, str | None]]) -> PhysicsCheck:
-    inner = next((attrs[n][0] for n in ("Inner Diameter", "ID", "Bore Diameter") if n in attrs), None)
-    outer = next((attrs[n][0] for n in ("Outer Diameter", "OD") if n in attrs), None)
-    if inner is None or outer is None:
+    inner_raw = next((attrs[n] for n in ("Inner Diameter", "ID", "Bore Diameter") if n in attrs), None)
+    outer_raw = next((attrs[n] for n in ("Outer Diameter", "OD") if n in attrs), None)
+    if inner_raw is None or outer_raw is None:
         return _check("id_lt_od", "SKIPPED")
+    inner = _length_in(*inner_raw)
+    outer = _length_in(*outer_raw)
     fields = ["Inner Diameter", "Outer Diameter"]
     if inner >= outer:
         return _check(
             "id_lt_od",
             "UNSAT",
             fields,
-            f"inner diameter {inner:g} cannot be greater than or equal to outer diameter {outer:g}",
+            f"inner diameter {inner_raw[0]:g}{inner_raw[1] or 'in'} cannot be greater than or "
+            f"equal to outer diameter {outer_raw[0]:g}{outer_raw[1] or 'in'} "
+            f"({inner:g} in vs {outer:g} in)",
         )
     return _check("id_lt_od", "SAT", fields)
 

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import Link from "next/link";
+import { Card, Btn, PageTitle, Stat } from "@/components/ui";
+import RevealOnMount from "@/components/reveal";
 
 const ROOT = process.env.MAAL_ROOT ?? path.join(process.cwd(), "..");
 
@@ -39,7 +40,7 @@ const STAGES = [
   {
     n: "02",
     title: "Classify",
-    body: "Every product lands in a distributor taxonomy — department, class, fine level, full classpath, UNSPSC code.",
+    body: "Every product lands in a distributor taxonomy: department, class, fine level, full classpath, UNSPSC code.",
   },
   {
     n: "03",
@@ -64,7 +65,7 @@ const STAGES = [
   {
     n: "07",
     title: "Write like the house",
-    body: "Five descriptions — till receipt to search title — are assembled by templates under strict character limits, unit styles and fraction rules. No free-form generation touches the record.",
+    body: "Five descriptions, till receipt to search title, are assembled by templates under strict character limits, unit styles and fraction rules. No free-form generation touches the record.",
   },
 ];
 
@@ -73,62 +74,45 @@ export default function AboutPage() {
 
   return (
     <article className="mx-auto max-w-3xl">
-      <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-ink2">
-        About
-      </p>
-      <h1 className="mt-3 font-sans text-3xl font-bold leading-tight">
-        Maal turns scattered product data into records a buyer can trust.
-      </h1>
-      <p className="mt-4 max-w-2xl text-base leading-relaxed text-ink2">
-        Industrial catalogs arrive as fragments — &ldquo;Milw 14&quot;x.045&quot;x1&quot; Metal
-        Cut Off Disc&rdquo;, six spellings of one manufacturer, empty fields wherever you
-        look. Maal reads those fragments and returns complete, standardized,
-        publish-ready product records. And it shows its work on every single value.
-      </p>
-
-      <div className="mt-8 grid grid-cols-3 gap-3">
-        <div className="rounded-[3px] border border-line bg-panel px-4 py-3">
-          <div className="font-mono text-xl font-semibold tabular-nums">
-            {rows.toLocaleString()}
-          </div>
-          <div className="mt-0.5 font-mono text-[10px] uppercase tracking-wide text-ink2">
-            Products enriched now
-          </div>
-        </div>
-        <div className="rounded-[3px] border border-line bg-panel px-4 py-3">
-          <div className="font-mono text-xl font-semibold tabular-nums">
-            {attributes.toLocaleString()}
-          </div>
-          <div className="mt-0.5 font-mono text-[10px] uppercase tracking-wide text-ink2">
-            Evidence-backed attributes
-          </div>
-        </div>
-        <div className="rounded-[3px] border border-line bg-panel px-4 py-3">
-          <div className="font-mono text-xl font-semibold">252</div>
-          <div className="mt-0.5 font-mono text-[10px] uppercase tracking-wide text-ink2">
-            Delivery-format columns per record
-          </div>
-        </div>
+      <RevealOnMount />
+      <div className="reveal">
+        <PageTitle
+          title="Maal turns scattered product data into records a buyer can trust."
+          sub={
+            'Industrial catalogs arrive as fragments: "Milw 14"x.045"x1" Metal Cut Off Disc", six spellings of one manufacturer, empty fields wherever you look. Maal reads those fragments and returns complete, standardized, publish-ready product records. And it shows its work on every single value.'
+          }
+        />
       </div>
 
-      <h2 className="mt-12 font-sans text-lg font-bold">How a row becomes a record</h2>
-      <ol className="mt-4 flex flex-col border-l border-line pl-6">
+      <div className="mt-8 grid grid-cols-3 gap-6 border-y border-line py-6">
+        <Stat label="Products enriched now" value={rows.toLocaleString()} />
+        <Stat label="Evidence-backed attributes" value={attributes.toLocaleString()} />
+        <Stat label="Delivery-format columns per record" value={252} />
+      </div>
+
+      <h2 className="mt-14 text-xl font-display font-semibold tracking-tight text-fg">
+        How a row becomes a record
+      </h2>
+      <ol className="mt-4 flex flex-col divide-y divide-line border-t border-line">
         {STAGES.map((s) => (
-          <li key={s.n} className="relative pb-6 last:pb-0">
-            <span className="absolute -left-[31px] top-1 flex h-2 w-2 rounded-full bg-accent" />
-            <span className="font-mono text-[10px] uppercase tracking-wider text-accent">
+          <li key={s.n} className="flex gap-6 py-6 md:gap-10">
+            <span className="w-10 shrink-0 font-display text-3xl font-extrabold tabular-nums text-fg-faint md:w-14 md:text-4xl">
               {s.n}
             </span>
-            <h3 className="mt-0.5 font-sans text-sm font-semibold">{s.title}</h3>
-            <p className="mt-1 max-w-2xl text-sm leading-relaxed text-ink2">{s.body}</p>
+            <div className="min-w-0">
+              <h3 className="font-display text-base font-semibold tracking-tight text-fg">
+                {s.title}
+              </h3>
+              <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-fg-dim">{s.body}</p>
+            </div>
           </li>
         ))}
       </ol>
 
-      <h2 className="mt-10 font-sans text-lg font-bold">
+      <h2 className="mt-14 text-xl font-display font-semibold tracking-tight text-fg">
         What makes a value trustworthy here
       </h2>
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
         <Principle
           title="Provenance or nothing"
           body="Each attribute carries its source URL and the exact sentence behind it. Click any value in the ledger and read why it is true."
@@ -147,25 +131,14 @@ export default function AboutPage() {
         />
       </div>
 
-      <div className="mt-10 flex flex-wrap gap-3 border-t border-line pt-6">
-        <Link
-          href="/enrich"
-          className="rounded-[3px] bg-accent px-4 py-2 font-mono text-xs font-semibold text-white hover:bg-accent/90"
-        >
-          Try it — enrich a product
-        </Link>
-        <Link
-          href="/compare"
-          className="rounded-[3px] border border-line bg-panel px-4 py-2 font-mono text-xs font-semibold hover:border-ink"
-        >
+      <div className="mt-12 flex flex-wrap gap-3 border-t border-line pt-8">
+        <Btn href="/enrich">Enrich a product</Btn>
+        <Btn href="/compare" variant="ghost">
           See the ground-truth check
-        </Link>
-        <Link
-          href="/"
-          className="rounded-[3px] border border-line bg-panel px-4 py-2 font-mono text-xs font-semibold hover:border-ink"
-        >
+        </Btn>
+        <Btn href="/" variant="ghost">
           Open the console
-        </Link>
+        </Btn>
       </div>
     </article>
   );
@@ -173,9 +146,9 @@ export default function AboutPage() {
 
 function Principle({ title, body }: { title: string; body: string }) {
   return (
-    <div className="rounded-[3px] border border-line bg-panel p-4">
-      <h3 className="font-sans text-sm font-semibold">{title}</h3>
-      <p className="mt-1 text-sm leading-relaxed text-ink2">{body}</p>
-    </div>
+    <Card>
+      <h3 className="font-display text-base font-semibold tracking-tight text-fg">{title}</h3>
+      <p className="mt-1.5 text-sm leading-relaxed text-fg-dim">{body}</p>
+    </Card>
   );
 }

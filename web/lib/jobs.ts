@@ -3,13 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import * as XLSX from "xlsx";
-import { OUTPUT_DIR, PROJECT_ROOT, isCloud, parseCsv } from "./artifacts";
+import { OUTPUT_DIR, PROJECT_ROOT, isCloud, parseCsv, resolvePython } from "./artifacts";
 
 export { isCloud };
 import type { SidecarField } from "./artifacts";
 
 export const JOBS_DIR = path.join(OUTPUT_DIR, "jobs");
-const PYTHON = path.join(PROJECT_ROOT, ".venv", "bin", "python");
+const PYTHON = resolvePython();
 
 export type JobStatus = "QUEUED" | "RUNNING" | "DONE" | "FAILED" | "CANCELLED";
 

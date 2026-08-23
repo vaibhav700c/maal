@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Btn } from "@/components/ui";
 
 type AttrOption = { label: string; value: string };
 
@@ -25,12 +26,12 @@ export default function CorrectionsForm({
   }
 
   async function submit() {
-    const attributes: Record<string, string> = {};
+    const attrs: Record<string, string> = {};
     for (const r of rows) {
-      if (r.label.trim() && r.value.trim()) attributes[r.label.trim()] = r.value.trim();
+      if (r.label.trim() && r.value.trim()) attrs[r.label.trim()] = r.value.trim();
     }
-    if (!Object.keys(attributes).length) {
-      setStatus("Nothing to send — add at least one label and value.");
+    if (!Object.keys(attrs).length) {
+      setStatus("Nothing to send. Add at least one label and value.");
       return;
     }
     setBusy(true);
@@ -38,7 +39,7 @@ export default function CorrectionsForm({
       const res = await fetch("/api/corrections", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mfg_part_num: mpn, attributes }),
+        body: JSON.stringify({ mfg_part_num: mpn, attributes: attrs }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
@@ -62,13 +63,11 @@ export default function CorrectionsForm({
     >
       <div>
         <div className="flex items-center justify-between">
-          <span className="font-mono text-[10px] uppercase tracking-wider text-ink2">
-            Correct a value
-          </span>
+          <span className="text-xs text-fg-faint">Correct a value</span>
           <button
             type="button"
             onClick={addRow}
-            className="font-mono text-[11px] text-accent underline decoration-accent/40 underline-offset-4 hover:decoration-accent"
+            className="font-mono text-[11px] text-accent underline decoration-accent/40 underline-offset-4 transition-colors duration-150 ease-out hover:decoration-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
           >
             + add field
           </button>
@@ -89,33 +88,29 @@ export default function CorrectionsForm({
             placeholder="Field label"
             value={row.label}
             onChange={(e) => update(i, { label: e.target.value })}
-            className="rounded-[3px] border border-line bg-paper px-2 py-1 font-mono text-xs focus:border-accent focus:outline-none"
+            className="rounded-md border border-line bg-surface-2 px-2 py-1.5 font-mono text-xs text-fg focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
           />
           <input
             placeholder="Corrected value"
             value={row.value}
             onChange={(e) => update(i, { value: e.target.value })}
-            className="rounded-[3px] border border-line bg-paper px-2 py-1 font-mono text-xs focus:border-accent focus:outline-none"
+            className="rounded-md border border-line bg-surface-2 px-2 py-1.5 font-mono text-xs text-fg focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
           />
           <button
             type="button"
             onClick={() => setRows((r) => r.filter((_, idx) => idx !== i))}
             aria-label={`Remove field ${i + 1}`}
-            className="px-1 font-mono text-xs text-ink2 hover:text-bad"
+            className="px-1 font-mono text-xs text-fg-faint transition-colors duration-150 ease-out hover:text-bad focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
           >
             ✕
           </button>
         </div>
       ))}
 
-      <button
-        type="submit"
-        disabled={busy}
-        className="self-start rounded-[3px] bg-accent px-3 py-1.5 font-mono text-xs font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
-      >
-        {busy ? "Sending…" : "Send correction"}
-      </button>
-      {status && <p className="text-xs text-ink2">{status}</p>}
+      <Btn type="submit" disabled={busy} className="self-start">
+        {busy ? "Saving…" : "Save correction"}
+      </Btn>
+      {status && <p className="text-xs text-fg-dim">{status}</p>}
     </form>
   );
 }

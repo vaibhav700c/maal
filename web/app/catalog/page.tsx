@@ -1,6 +1,15 @@
 import Link from "next/link";
 import { listRows } from "@/lib/artifacts";
-import { Chip, flagTone, physicsSummary, TriageMeter } from "@/components/ui";
+import {
+  Btn,
+  Card,
+  Chip,
+  Empty,
+  PageTitle,
+  TriageMeter,
+  flagTone,
+  physicsSummary,
+} from "@/components/ui";
 import RunPanel from "@/components/run-panel";
 
 const FILTERS = [
@@ -20,18 +29,20 @@ export default async function CatalogPage({
 
   if (!rows.length) {
     return (
-      <div className="mx-auto max-w-xl border border-line bg-panel p-8">
-        <h1 className="font-sans text-base font-semibold">No enriched rows yet</h1>
-        <p className="mt-2 text-sm text-ink2">
-          Run the pipeline to populate the catalog — use the panel below or the CLI:
-        </p>
-        <pre className="mt-3 overflow-x-auto rounded-[3px] border border-line bg-paper p-3 font-mono text-xs">
-          PYTHONPATH=src .venv/bin/python -m pipeline.run_batch --limit 10
-        </pre>
-        <div className="mt-4">
+      <section className="mx-auto flex max-w-2xl flex-col gap-6">
+        <PageTitle
+          title="Catalog"
+          sub="The dense review queue for every enriched row, ranked by triage risk."
+        />
+        <Empty
+          title="No enriched rows yet"
+          hint="Run an enrichment job to populate the catalog. Send one product or a spreadsheet from Enrich, and rows will appear here as they finish."
+          action={<Btn href="/enrich">Enrich products</Btn>}
+        />
+        <Card>
           <RunPanel />
-        </div>
-      </div>
+        </Card>
+      </section>
     );
   }
 
@@ -49,38 +60,46 @@ export default async function CatalogPage({
         );
 
   return (
-    <section>
-      <div className="pb-4">
-        <RunPanel />
-      </div>
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pb-4">
-        <h1 className="font-sans text-sm font-semibold uppercase tracking-[0.14em] text-ink2">
-          Catalog review queue
-        </h1>
-        <nav className="flex flex-wrap items-center gap-2">
-          {counts.map((f) => {
-            const isActive = f.key === active.key;
-            return (
-              <Link
-                key={f.key}
-                href={f.key === "all" ? "/catalog" : `/catalog?filter=${f.key}`}
-                className={`rounded-[3px] border px-2.5 py-1 font-mono text-[11px] ${
-                  isActive
-                    ? "border-accent/50 bg-accent/10 text-accent"
-                    : "border-line bg-panel text-ink2 hover:border-ink2 hover:text-ink"
-                }`}
-              >
-                {f.label} · {f.count}
-              </Link>
-            );
-          })}
-        </nav>
+    <section className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <PageTitle
+          title="Catalog"
+          sub="Dense review queue, sorted by triage score. Highest review risk first."
+        />
+        <div className="flex flex-wrap gap-2">
+          <Btn href="/api/download/result.csv">result.csv</Btn>
+          <Btn variant="ghost" href="/api/download/result.xlsx">result.xlsx</Btn>
+          <Btn variant="ghost" href="/api/download/sidecar.jsonl">sidecar.jsonl</Btn>
+        </div>
       </div>
 
-      <div className="overflow-hidden rounded-[3px] border border-line bg-panel">
-        <table className="w-full text-left text-sm">
+      <Card>
+        <RunPanel />
+      </Card>
+
+      <div className="sticky top-[60px] z-10 -mx-4 flex flex-wrap items-center gap-2 border-y border-line bg-ink/95 px-4 py-3 backdrop-blur">
+        {counts.map((f) => {
+          const isActive = f.key === active.key;
+          return (
+            <Link
+              key={f.key}
+              href={f.key === "all" ? "/catalog" : `/catalog?filter=${f.key}`}
+              className={`rounded-full border px-3 py-1 font-mono text-[11px] transition-colors duration-150 ease-out focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 ${
+                isActive
+                  ? "border-accent/50 bg-accent/10 text-accent"
+                  : "border-line bg-surface text-fg-dim hover:border-line-2 hover:text-fg"
+              }`}
+            >
+              {f.label} · {f.count}
+            </Link>
+          );
+        })}
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border border-line bg-surface">
+        <table className="w-full min-w-[760px] text-left text-sm">
           <thead>
-            <tr className="border-b border-line font-mono text-[10px] uppercase tracking-wider text-ink2">
+            <tr className="border-b border-line text-xs text-fg-faint">
               <th className="w-10 px-3 py-2 font-medium" aria-label="triage" />
               <th className="px-3 py-2 font-medium">Part number</th>
               <th className="px-3 py-2 font-medium">Classpath</th>
@@ -89,37 +108,37 @@ export default async function CatalogPage({
               <th className="px-3 py-2 font-medium">Flags</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-line">
             {visible.map((row) => {
               const phys = physicsSummary(row);
               return (
                 <tr
                   key={row.mpn}
-                  className="border-b border-line last:border-b-0 hover:bg-paper"
+                  className="transition-colors duration-150 ease-out hover:bg-surface-2"
                 >
-                  <td className="px-3 py-2 align-middle">
+                  <td className="py-2 px-3 align-middle">
                     <div className="flex justify-center">
                       <TriageMeter score={row.triage} />
                     </div>
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="py-2 px-3">
                     <Link
                       href={`/row/${encodeURIComponent(row.mpn)}`}
-                      className="font-mono text-[13px] underline decoration-line underline-offset-4 hover:decoration-accent hover:text-accent"
+                      className="font-mono text-[13px] text-fg underline decoration-line underline-offset-4 transition-colors duration-150 ease-out hover:text-accent hover:decoration-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
                     >
                       {row.mpn}
                     </Link>
                   </td>
-                  <td className="max-w-md truncate px-3 py-2 text-ink2">
-                    {row.classpath || "— unclassified —"}
+                  <td className="max-w-md truncate py-2 px-3 text-fg-dim">
+                    {row.classpath || "not classified"}
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="py-2 px-3">
                     <Chip tone={phys.tone}>{phys.label}</Chip>
                   </td>
-                  <td className="px-3 py-2 font-mono text-[13px]">
+                  <td className="py-2 px-3 font-mono text-[13px] text-fg">
                     {row.meanConfidence.toFixed(2)}
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="py-2 px-3">
                     <div className="flex flex-wrap gap-1">
                       {row.flags.length === 0 && <Chip tone="ok">CLEAN</Chip>}
                       {row.flags.map((flag) => (
@@ -135,8 +154,8 @@ export default async function CatalogPage({
           </tbody>
         </table>
       </div>
-      <p className="pt-3 font-mono text-[11px] text-ink2">
-        Sorted by triage score — highest review risk first. Downloads in the header.
+      <p className="font-mono text-[11px] text-fg-faint">
+        Sorted by triage score, highest review risk first.
       </p>
     </section>
   );

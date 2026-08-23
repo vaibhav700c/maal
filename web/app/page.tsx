@@ -1,81 +1,110 @@
 import Link from "next/link";
 import { listJobs } from "@/lib/jobs";
+import { listRows } from "@/lib/artifacts";
+import { Card, Btn, Stat, Empty } from "@/components/ui";
+import RevealOnMount from "@/components/reveal";
 
 const STATUS_TONE: Record<string, string> = {
   RUNNING: "text-accent",
   DONE: "text-ok",
   FAILED: "text-bad",
-  CANCELLED: "text-ink2",
+  CANCELLED: "text-fg-faint",
 };
 
 export default function HomePage() {
-  const jobs = listJobs().slice(0, 6);
+  const allJobs = listJobs();
+  const jobs = allJobs.slice(0, 6);
+
+  const rows = listRows();
+  const flaggedCount = rows.filter((r) => r.flags.length > 0).length;
+  const confirmedCount = rows.length - flaggedCount;
+  const confirmedLabel =
+    rows.length === 0 ? "none yet" : `${Math.round((confirmedCount / rows.length) * 100)}%`;
 
   return (
-    <section className="mx-auto max-w-3xl">
-      <div className="border-b border-line pb-8">
-        <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-ink2">
-          Industrial product intelligence
-        </p>
-        <h1 className="mt-2 max-w-xl font-sans text-2xl font-bold leading-tight">
-          Turn raw part listings into verified, commerce-ready records.
+    <section className="mx-auto max-w-5xl">
+      <RevealOnMount />
+
+      <div className="border-b border-line pb-10 pt-4 md:pb-14 md:pt-8">
+        <h1 className="reveal font-display text-4xl font-extrabold tracking-tight text-fg md:text-5xl">
+          Every value earns its place.
         </h1>
-        <p className="mt-3 max-w-xl text-sm leading-relaxed text-ink2">
+        <p
+          className="reveal mt-4 max-w-xl text-sm text-fg-dim md:text-base"
+          style={{ transitionDelay: "60ms" }}
+        >
           Every value arrives with its source document, an adversarial audit
-          verdict, and a physics check. Nothing is invented — anything the
+          verdict, and a physics check. Nothing is invented: anything the
           pipeline cannot prove is flagged for review instead.
         </p>
-        <div className="mt-5 flex gap-3">
-          <Link
-            href="/enrich"
-            className="rounded-[3px] bg-accent px-4 py-2 font-mono text-xs font-semibold text-white hover:bg-accent/90"
-          >
-            Enrich products
-          </Link>
-          <Link
-            href="/catalog"
-            className="rounded-[3px] border border-line bg-panel px-4 py-2 font-mono text-xs font-semibold hover:border-ink"
-          >
-            Browse catalog
-          </Link>
+        <div className="reveal mt-6 flex flex-wrap gap-3" style={{ transitionDelay: "120ms" }}>
+          <Btn href="/enrich">Enrich a product</Btn>
+          <Btn href="/catalog" variant="ghost">
+            Browse the catalog
+          </Btn>
         </div>
       </div>
 
-      <div className="pt-6">
-        <div className="flex items-center justify-between">
-          <h2 className="font-mono text-[10px] uppercase tracking-wider text-ink2">
-            Recent enrichment runs
+      <div
+        className="reveal grid grid-cols-2 gap-6 border-b border-line py-8 sm:grid-cols-4 md:py-10"
+        style={{ transitionDelay: "160ms" }}
+      >
+        <Stat label="Enrichment runs" value={allJobs.length} />
+        <Stat label="Rows in catalog" value={rows.length} />
+        <Stat label="Confirmed" value={confirmedLabel} tone="ok" />
+        <Stat
+          label="Flagged for review"
+          value={flaggedCount}
+          tone={flaggedCount > 0 ? "warn" : "neutral"}
+        />
+      </div>
+
+      <div className="pt-8 md:pt-10">
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="text-xl font-display font-semibold tracking-tight text-fg">
+            Recent jobs
           </h2>
-          <Link href="/enrich" className="font-mono text-xs text-accent underline decoration-accent/40 underline-offset-4 hover:decoration-accent">
-            + new run
-          </Link>
+          <Btn href="/enrich" variant="ghost" className="px-3 py-1.5 text-[11px]">
+            Start a run
+          </Btn>
         </div>
+
         {jobs.length === 0 ? (
-          <p className="mt-3 rounded-[3px] border border-line bg-panel p-5 text-sm text-ink2">
-            No runs yet. Send one product or a spreadsheet from{" "}
-            <Link href="/enrich" className="underline underline-offset-4">
-              Enrich products
-            </Link>{" "}
-            and it will appear here with its results.
-          </p>
+          <div className="mt-4">
+            <Empty
+              title="No runs yet."
+              hint="Send one product or a spreadsheet from Enrich and it will appear here with its results."
+              action={<Btn href="/enrich">Enrich a product</Btn>}
+            />
+          </div>
         ) : (
-          <ul className="mt-3 flex flex-col gap-2">
-            {jobs.map((job) => (
-              <li key={job.id}>
+          <ul className="mt-4 flex flex-col gap-3">
+            {jobs.map((job, i) => (
+              <li
+                key={job.id}
+                className="reveal"
+                style={{ transitionDelay: `${200 + i * 40}ms` }}
+              >
                 <Link
                   href={`/jobs/${job.id}`}
-                  className="flex items-center justify-between gap-4 rounded-[3px] border border-line bg-panel px-4 py-3 hover:border-ink"
+                  className="block rounded-xl focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
                 >
-                  <div className="min-w-0">
-                    <span className="block truncate font-mono text-sm">{job.name}</span>
-                    <span className="font-mono text-[10px] uppercase tracking-wide text-ink2">
-                      {new Date(job.createdAt).toLocaleString()} · {job.inputRows} row
-                      {job.inputRows === 1 ? "" : "s"}
+                  <Card interactive className="flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="truncate font-mono text-sm text-fg">{job.name}</p>
+                      <p className="mt-1 text-xs text-fg-faint">
+                        {new Date(job.createdAt).toLocaleString()} · {job.inputRows} row
+                        {job.inputRows === 1 ? "" : "s"}
+                      </p>
+                    </div>
+                    <span
+                      className={`shrink-0 font-mono text-xs font-semibold ${
+                        STATUS_TONE[job.status] ?? "text-fg-dim"
+                      }`}
+                    >
+                      {job.status}
                     </span>
-                  </div>
-                  <span className={`shrink-0 font-mono text-xs font-semibold ${STATUS_TONE[job.status] ?? ""}`}>
-                    {job.status}
-                  </span>
+                  </Card>
                 </Link>
               </li>
             ))}

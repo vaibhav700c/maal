@@ -488,7 +488,7 @@ async def run_batch(
     write_outputs(all_results, settings.output_dir)
     if quota_dead:
         remaining = len(pending_rows) - sum(1 for r in pending_rows if checkpoint.has(r.mfg_part_num))
-        print(f"daily quota exhausted; ~{max(0, remaining)} rows remain — "
+        print(f"daily quota exhausted; ~{max(0, remaining)} rows remain, "
               "rerun tomorrow or after billing is enabled", file=sys.stderr)
     return all_results
 

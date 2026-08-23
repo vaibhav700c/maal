@@ -37,7 +37,8 @@ class _QuotaBackend:
         return B()
 
 
-async def test_client_fails_over_on_daily_quota(monkeypatch):
+async def test_client_fails_over_on_daily_quota(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)  # isolate the on-disk response cache from other runs
     settings = Settings(
         api_key="k", model="model-a", model_fallbacks=["model-b"],
         rpm=6000,

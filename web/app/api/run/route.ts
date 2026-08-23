@@ -2,14 +2,14 @@ import { spawn, execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
-import { OUTPUT_DIR, PROJECT_ROOT, isCloud } from "@/lib/artifacts";
+import { OUTPUT_DIR, PROJECT_ROOT, isCloud, resolvePython } from "@/lib/artifacts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const RUN_META = path.join(OUTPUT_DIR, "run.json");
 const RUN_LOG = path.join(OUTPUT_DIR, "batch-ui.log");
-const PYTHON = path.join(PROJECT_ROOT, ".venv", "bin", "python");
+const PYTHON = resolvePython();
 
 type RunMeta = {
   pid: number | null;

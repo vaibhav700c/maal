@@ -1,17 +1,80 @@
 @import "tailwindcss";
 
 @theme {
-  --color-paper: #fafbfc;
-  --color-panel: #ffffff;
-  --color-ink: #1a1d21;
-  --color-ink2: #5c6470;
-  --color-line: #e3e7eb;
-  --color-accent: #e8590c;
-  --color-ok: #2f9e44;
-  --color-warn: #e8930c;
-  --color-bad: #e03131;
+  --color-ink: #0b0d10;
+  --color-ink-2: #0f1216;
+  --color-surface: #151a20;
+  --color-surface-2: #1b222b;
+  --color-line: #232b35;
+  --color-line-2: #2f3a47;
+  --color-fg: #e9ecef;
+  --color-fg-dim: #97a1ad;
+  --color-fg-faint: #5c6672;
+  --color-accent: #22d3ee;
+  --color-accent-ink: #062a31;
+  --color-ok: #34d399;
+  --color-warn: #fbbf24;
+  --color-bad: #f87171;
+  --font-display: "Bricolage Grotesque", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
 }
 
-:root {
-  font-variant-numeric: tabular-nums;
+body {
+  background-color: var(--color-ink);
+  color: var(--color-fg);
+  font-family: system-ui, sans-serif;
+}
+
+::selection {
+  background-color: var(--color-accent);
+  color: var(--color-accent-ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+nav a[aria-current="page"] {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.reveal {
+  opacity: 0;
+  transform: translateY(0.5rem);
+  transition:
+    opacity 250ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 250ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.reveal.in {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.pulse-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .pulse-dot {
+    animation: none;
+  }
 }

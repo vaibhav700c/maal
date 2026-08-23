@@ -1,66 +1,83 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
 
-const plexSans = IBM_Plex_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-plex-sans",
-});
-
-const plexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  variable: "--font-plex-mono",
-});
-
 export const metadata: Metadata = {
-  title: "Maal — Product Intelligence Console",
+  title: "Maal",
+  description:
+    "Maal verifies every product attribute against its source, an adversarial audit, and a physics check before it reaches your catalog.",
 };
 
-const downloads = [
-  { label: "result.csv", href: "/api/download/result.csv" },
-  { label: "result.xlsx", href: "/api/download/result.xlsx" },
-  { label: "sidecar.jsonl", href: "/api/download/sidecar.jsonl" },
+const NAV_LINKS = [
+  { href: "/", label: "Dashboard" },
+  { href: "/enrich", label: "Enrich" },
+  { href: "/catalog", label: "Catalog" },
+  { href: "/compare", label: "Compare" },
+  { href: "/about", label: "About" },
 ];
+
+// Highlights the nav link matching the current path. Kept as a plain inline
+// script (no React hook) so this file can stay a server component: a client
+// component here would force components/ui.tsx into a "use client" module,
+// which breaks the plain function exports (verdictTone, flagTone,
+// physicsSummary) that catalog/row/job pages call directly during server
+// rendering. Reacts to Next's client-side navigations via the History API.
+const NAV_ACTIVE_SCRIPT = `(function(){function s(){var p=location.pathname;document.querySelectorAll("[data-nav-link]").forEach(function(a){var h=a.getAttribute("data-nav-link");var on=h==="/"?p==="/":p===h||p.indexOf(h+"/")===0;if(on){a.setAttribute("aria-current","page")}else{a.removeAttribute("aria-current")}})}var ps=history.pushState,rs=history.replaceState;history.pushState=function(){ps.apply(this,arguments);s()};history.replaceState=function(){rs.apply(this,arguments);s()};addEventListener("popstate",s);s()})();`;
 
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${plexSans.variable} ${plexMono.variable}`}>
-      <body className="min-h-screen bg-paper font-sans text-ink antialiased">
-        <header className="border-b border-line bg-panel">
-          <div className="flex items-center justify-between px-6 py-3">
-            <Link href="/about" className="flex items-baseline gap-3" title="What is Maal?">
-              <span className="font-sans text-lg font-bold tracking-[0.18em]">
-                MAAL
-              </span>
-              <span className="font-mono text-[11px] uppercase tracking-[0.22em] text-ink2">
-                Product Intelligence Console
+    <html lang="en">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link
+          rel="preconnect"
+          href="https://fonts.gstatic.com"
+          crossOrigin="anonymous"
+        />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;800&family=JetBrains+Mono:wght@400;500;700&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body className="flex min-h-screen flex-col antialiased">
+        <header className="sticky top-0 z-50 h-[60px] border-b border-line bg-ink-2/80 backdrop-blur">
+          <div className="mx-auto flex h-full max-w-6xl items-center justify-between gap-6 px-4">
+            <Link
+              href="/"
+              className="flex shrink-0 items-center gap-2 focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
+            >
+              <span className="h-2.5 w-2.5 rounded-full bg-accent" aria-hidden="true" />
+              <span className="font-display text-base font-extrabold tracking-tight text-fg">
+                Maal
               </span>
             </Link>
-            <nav className="flex items-center gap-5">
-              <Link href="/enrich" className="rounded-[3px] bg-accent px-3 py-1.5 font-mono text-xs font-semibold text-white hover:bg-accent/90">
-                Enrich
-              </Link>
-              <Link href="/" className="font-mono text-xs text-ink2 underline decoration-line underline-offset-4 hover:text-ink">
-                Dashboard
-              </Link>
-              <Link href="/catalog" className="font-mono text-xs text-ink2 underline decoration-line underline-offset-4 hover:text-ink">
-                Catalog
-              </Link>
-              <Link href="/compare" className="font-mono text-xs text-ink2 underline decoration-line underline-offset-4 hover:text-ink">
-                Ground truth
-              </Link>
-              <Link href="/about" className="font-mono text-xs text-ink2 underline decoration-line underline-offset-4 hover:text-ink">
-                About
-              </Link>
+            <nav className="flex min-w-0 items-center gap-5 overflow-x-auto">
+              {NAV_LINKS.map((l) => (
+                <Link
+                  key={l.href}
+                  href={l.href}
+                  data-nav-link={l.href}
+                  className="shrink-0 whitespace-nowrap py-1 text-sm text-fg-dim transition-colors duration-150 ease-out hover:text-fg focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
+                >
+                  {l.label}
+                </Link>
+              ))}
             </nav>
           </div>
         </header>
-        <main className="px-6 py-6">{children}</main>
+        <main className="flex-1 px-4 py-8">{children}</main>
+        <footer className="border-t border-line px-4 py-4 text-xs text-fg-faint">
+          Maal, provenance-first product intelligence.{" "}
+          <Link
+            href="/about"
+            className="underline underline-offset-4 hover:text-fg-dim focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
+          >
+            About
+          </Link>
+        </footer>
+        <script dangerouslySetInnerHTML={{ __html: NAV_ACTIVE_SCRIPT }} />
       </body>
     </html>
   );

@@ -34,6 +34,17 @@ export function correctionsPath(): string {
   return path.join(artifactBase(), "corrections.jsonl");
 }
 
+/** Resolve the Python binary to run the pipeline with: MAAL_PYTHON env var,
+ * then a Windows venv, then a unix venv, then whatever "python" is on PATH. */
+export function resolvePython(): string {
+  if (process.env.MAAL_PYTHON) return process.env.MAAL_PYTHON;
+  const winVenv = path.join(PROJECT_ROOT, ".venv", "Scripts", "python.exe");
+  if (fs.existsSync(winVenv)) return winVenv;
+  const unixVenv = path.join(PROJECT_ROOT, ".venv", "bin", "python");
+  if (fs.existsSync(unixVenv)) return unixVenv;
+  return "python";
+}
+
 export type SidecarField = {
   value: string | null;
   uom?: string | null;
