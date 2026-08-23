@@ -159,7 +159,12 @@ def build_output_row(
     # Unilog asset conventions: named images + specification sheet follow the
     # BRAND_MPN pattern once the maker's own page for this part is confirmed.
     brand_source = (extraction.brand if extraction else None) or _brand_display(row)
-    if brand_source and retrieval and (retrieval.product_url or retrieval.ref_urls):
+    brand_domain_confirmed = bool(
+        retrieval and "BRAND_DOMAIN_LOOKUP" in (retrieval.flags or [])
+    )
+    if brand_source and retrieval and (
+        retrieval.product_url or retrieval.ref_urls or brand_domain_confirmed
+    ):
         import re as _re
 
         brand_file = _re.sub(r"[^A-Za-z0-9]+", "", brand_source).upper()
