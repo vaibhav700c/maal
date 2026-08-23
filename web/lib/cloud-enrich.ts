@@ -347,27 +347,55 @@ async function ddgsSearch(query: string): Promise<string[]> {
  * URL and defeats the TLS/bot walls that block serverless fetches on sites
  * like frigidaire.com. Falls back silently when the proxy is unavailable.
  */
-async function readerFetch(url: string, timeoutMs = 15000): Promise<string | null> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const res = await fetch(`https://r.jina.ai/${url}`, {
-      headers: { "User-Agent": UA, Accept: "text/plain" },
-      signal: ctrl.signal,
-    });
-    if (!res.ok) return null;
-    const body = await res.text();
-    return body.length > 40 ? body : null;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
+const JINA_KEY = process.env.JINA_API_KEY || "";
+
+async function readerFetch(url: string, timeoutMs = 9000): Promise<string | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const headers: Record<string, string> = { "User-Agent": UA, Accept: "text/plain" };
+      if (JINA_KEY) headers["Authorization"] = `Bearer ${JINA_KEY}`;
+      const res = await fetch(`https://r.jina.ai/${url}`, {
+        headers,
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      if (!res.ok) {
+        if (attempt === 0 && (res.status === 429 || res.status === 451)) {
+          await new Promise((r) => setTimeout(r, 800));
+          continue;
+        }
+        return null;
+      }
+      const body = await res.text();
+      return body.length > 40 ? body : null;
+    } catch {
+      clearTimeout(timer);
+      if (attempt > 0) return null;
+    }
   }
+  return null;
 }
 
 /** Fetch a page's readable text: Jina Reader first, direct fetch fallback. */
 async function pageText(url: string): Promise<string | null> {
-  return readerFetch(url);
+  const viaJina = await readerFetch(url);
+  if (viaJina) return viaJina;
+  const t = withTimeout(8000);
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA },
+      redirect: "follow",
+      signal: t.signal,
+    });
+    t.done();
+    if (!res.ok) return null;
+    const html = await res.text();
+    return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  } catch {
+    return null;
+  }
 }
 
 async function probeUrl(url: string): Promise<string | null> {
