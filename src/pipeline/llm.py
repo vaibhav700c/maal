@@ -162,6 +162,14 @@ class LLMClient:
 
             settings = Settings.from_env()
         self._settings = settings
+        if not settings.model_fallbacks and not backend:
+            # proven working chain when no explicit config is provided
+            settings.model_fallbacks = [
+                "gemini-flash-latest",
+                "gemini-flash-lite-latest",
+            ]
+            if settings.model == "gemini-2.5-flash":
+                settings.model = "gemini-3.1-flash-lite"
         self.backend = backend or GeminiBackend(settings.api_key, settings.model)
         self.limiter = RateLimiter(settings.rpm)
         self._injected_backend = backend is not None

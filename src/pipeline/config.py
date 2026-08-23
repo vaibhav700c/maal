@@ -32,7 +32,7 @@ class Settings:
         _load_dotenv(ROOT / ".env")
         return cls(
             api_key=os.environ.get("GEMINI_API_KEY", ""),
-            model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+            model=os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite"),
             model_fallbacks=[
                 m.strip()
                 for m in os.environ.get("GEMINI_MODEL_FALLBACKS", "").split(",")
