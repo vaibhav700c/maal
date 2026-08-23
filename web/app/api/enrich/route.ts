@@ -4,10 +4,6 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-/**
- * Thin proxy: the real enrichment runs on the Render FastAPI service
- * (full Python pipeline incl. Z3 + Jina retrieval).
- */
 const BACKEND = process.env.BACKEND_URL;
 
 export async function POST(request: Request) {
@@ -17,16 +13,20 @@ export async function POST(request: Request) {
       { status: 503 }
     );
   }
+
+  const contentType = request.headers.get("content-type") ?? "";
+  const isFile = contentType.includes("multipart/form-data");
+  const endpoint = isFile ? "/enrich/batch" : "/enrich/single";
+
   try {
-    // pass through both single-product JSON and CSV multipart untouched
-    const res = await fetch(`${BACKEND.replace(/\/$/, "")}/enrich/single`, {
+    const upstream = await fetch(`${BACKEND.replace(/\/$/, "")}${endpoint}`, {
       method: "POST",
-      headers: { "Content-Type": request.headers.get("content-type") ?? "application/json" },
-      body: await request.text(),
+      headers: { "Content-Type": contentType },
+      body: await request.arrayBuffer(),
     });
-    return new NextResponse(res.body, {
-      status: res.status,
-      headers: { "Content-Type": res.headers.get("content-type") ?? "application/json" },
+    return new NextResponse(upstream.body, {
+      status: upstream.status,
+      headers: { "Content-Type": upstream.headers.get("content-type") ?? "application/json" },
     });
   } catch {
     return NextResponse.json(

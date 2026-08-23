@@ -431,7 +431,7 @@ async def enrich_batch_file(file: bytes = File(...)) -> dict:
     reader = _csv.DictReader(io.StringIO(text))
     headers = [h.strip().lower() for h in (reader.fieldnames or [])]
     i_mpn = next((headers.index(h) for h in headers if h in ("mfg_part_num", "mpn", "part number", "sku")), None)
-    i_desc = next((headers.index(h) for h in headers if h in ("part_desc", "description", "desc")), None)
+    i_desc = next((headers.index(h) for h in headers if h in ("part_desc", "description", "desc", "product description", "item description", "title") or "description" in h), None)
     if i_mpn is None or i_desc is None:
         raise HTTPException(status_code=422, detail="Need part-number and description columns")
     for r in reader:
