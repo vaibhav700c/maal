@@ -67,7 +67,14 @@ class BatchRequest(BaseModel):
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "service": "maal-enrichment"}
+    import os
+
+    return {
+        "status": "ok",
+        "service": "maal-enrichment",
+        "gemini_key_present": bool(os.environ.get("GEMINI_API_KEY")),
+        "env_keys_sample": sorted(list(os.environ.keys()))[:8],
+    }
 
 
 async def enrich_product(p: Product) -> tuple[dict, dict]:
