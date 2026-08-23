@@ -355,7 +355,6 @@ async def _retrieve(
         if deep_cached not in result.ref_urls:
             result.ref_urls.insert(0, deep_cached)
     elif deep_cached:
-        result.refUrls_placeholder = None  # no-op guard
         if deep_cached not in result.ref_urls:
             result.ref_urls.append(deep_cached)
     base_url = f"https://{domain}"

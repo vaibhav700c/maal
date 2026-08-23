@@ -186,13 +186,17 @@ export function anyJobRunning(): JobMeta | null {
 }
 
 export function listJobs(): JobMeta[] {
-  fs.mkdirSync(JOBS_DIR, { recursive: true });
-  return fs
-    .readdirSync(JOBS_DIR)
-    .map((id) => readMeta(id))
-    .filter((m): m is JobMeta => m !== null)
-    .map(refreshMeta)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  try {
+    if (!fs.existsSync(JOBS_DIR)) return [];
+    return fs
+      .readdirSync(JOBS_DIR)
+      .map((id) => readMeta(id))
+      .filter((m): m is JobMeta => m !== null)
+      .map(refreshMeta)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  } catch {
+    return [];
+  }
 }
 
 export function getJob(id: string): JobMeta | null {
