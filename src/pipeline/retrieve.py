@@ -112,9 +112,6 @@ def reader_text(url: str, timeout: int = 12) -> str | None:
 def jina_ddg_urls(query: str, timeout: int = 12) -> list[str]:
     """Search results via Jina-proxied DuckDuckGo Lite (IP-block resistant).
     Decodes DDG's uddg= redirect wrappers into real target URLs."""
-    import urllib.parse
-from urllib.parse import quote_plus
-
     body = reader_text(f"https://lite.duckduckgo.com/lite/?q={quote_plus(query)}", timeout)
     if not body:
         return []
