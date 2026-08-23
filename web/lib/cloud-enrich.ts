@@ -569,7 +569,9 @@ export async function enrichOne(input: CloudInput): Promise<CloudRow> {
     retrieval.snippets.find((s) => needle && s.quote.toLowerCase().includes(needle.toLowerCase()));
 
   for (const raw of (data.attributes ?? []) as RawAttr[]) {
-    const label = String(raw.label ?? "").trim();
+    const label = String(raw.label ?? "")
+      .trim()
+      .replace(/\b[a-z]/g, (c) => c.toUpperCase());  // house style: Title Case
     const value = String(raw.value ?? "").trim();
     if (!label || !value) continue;
     const hit = snippetHit(String(raw.quote ?? "") || value);
