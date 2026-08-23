@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
-import { OUTPUT_DIR } from "@/lib/artifacts";
+import { artifactBase } from "@/lib/artifacts";
 
 export const runtime = "nodejs";
 
@@ -20,7 +20,7 @@ export async function GET(request: Request) {
   if (!contentType) {
     return NextResponse.json({ error: "Unknown artifact" }, { status: 404 });
   }
-  const baseDir = jobId ? path.join(OUTPUT_DIR, "jobs", jobId) : OUTPUT_DIR;
+  const baseDir = jobId ? path.join(artifactBase(), "jobs", jobId) : artifactBase();
   const filePath = path.join(baseDir, path.basename(file));
   if (!fs.existsSync(filePath)) {
     return NextResponse.json({ error: "Artifact not generated yet" }, { status: 404 });
