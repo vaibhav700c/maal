@@ -186,5 +186,25 @@ def main(argv=None) -> None:
     print(f"wrote {len(rows)} demo rows to {args.out_dir}", file=sys.stderr)
 
 
+def copy_reference_files(out_dir: Path) -> None:
+    """Ship the Delivery Format + sample input next to the artifacts so the
+    hosted /compare view works from the snapshot alone."""
+    import shutil
+
+    refs = {
+        ROOT / "input" / "Unihack_ Expected Output - Delivery Format.csv": "expected-delivery-format.csv",
+        ROOT / "input" / "Unihack_ Sample Dataset - Input.csv": "sample-input.csv",
+    }
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for src_file, name in refs.items():
+        if src_file.exists():
+            shutil.copyfile(src_file, out_dir / name)
+
+
 if __name__ == "__main__":
-    main()
+    main()  # parses argv internally
+    out_dir = Path(__file__).resolve().parents[1] / "output"
+    if "--out-dir" in sys.argv:
+        out_dir = Path(sys.argv[sys.argv.index("--out-dir") + 1])
+    copy_reference_files(out_dir)
+    print(f"reference files copied to {out_dir}")
