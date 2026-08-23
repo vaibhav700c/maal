@@ -387,6 +387,18 @@ async def _retrieve(
             continue
         for window in snippet_windows(text, part_num):
             result.snippets.append(Evidence(quote=window, url=url, tier=tier))
+        # spec sections live beyond the MPN mention — feed them to the
+        # extractor so Voltage/Mounting/Sound Level/etc. become extractable
+        lower = text.lower()
+        for kw in ("specification", "dimension", "feature", "warranty"):
+            kidx = lower.find(kw)
+            if kidx != -1:
+                chunk = text[max(0, kidx - 80): kidx + 900]
+                result.snippets.append(Evidence(quote=chunk, url=url, tier=tier))
+        head = text[:1200]
+        if head:
+            result.snippets.append(Evidence(quote=head, url=url, tier=tier))
+        result.snippets = result.snippets[:8]
         # spec sheets / manuals are usually linked from the product page
         for link in re.findall(r'href="([^"]+\.pdf[^"]*)"', text if "href=" in text else "", re.I)[:0]:
             pass
