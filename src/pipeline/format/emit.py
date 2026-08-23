@@ -114,7 +114,7 @@ def write_outputs(
         matrix.append(merged)
 
     csv_path = outdir / "result.csv"
-    with open(csv_path, "w", newline="") as handle:
+    with open(csv_path, "w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.DictWriter(handle, fieldnames=headers, extrasaction="raise")
         writer.writeheader()
         writer.writerows(matrix)

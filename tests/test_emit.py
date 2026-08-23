@@ -51,7 +51,7 @@ def test_passthrough_fields_mapped():
 def test_write_outputs_roundtrip(tmp_path):
     rows = [_row("A1"), _row("B2"), _row("C3")]
     csv_path, xlsx_path, sidecar_path = write_outputs(rows, tmp_path)
-    assert csv_path.read_text().splitlines()[0].startswith("MFR URL")
+    assert csv_path.read_text(encoding="utf-8-sig").splitlines()[0].startswith("MFR URL")
     with open(csv_path, newline="") as f:
         reader = csv.reader(f)
         header = next(reader)
