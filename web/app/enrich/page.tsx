@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Card, Btn, PageTitle } from "@/components/ui";
+import { RecordCard, type JobResultRow } from "@/components/record-card";
 import RevealOnMount from "@/components/reveal";
 
 export default function EnrichPage() {
@@ -15,18 +16,53 @@ export default function EnrichPage() {
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [rows, setRows] = useState<JobResultRow[] | null>(null);
 
-  async function post(res: Promise<Response>) {
+  async function downloadCsv() {
+    if (!rows?.length) return;
+    const headers = ["mpn", "classpath", "unspsc", "brand", "manufacturer",
+      "invoiceDesc", "mobileDesc", "shortDesc", "longDesc", "retailDesc"];
+    for (let i = 1; i <= Math.max(...rows.map((r) => r.attributes.length)); i++) {
+      headers.push(`attr${i}_label`, `attr${i}_value`, `attr${i}_uom`);
+    }
+    const esc = (v: string) => (/["\n,]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+    const lines = [headers.join(",")];
+    for (const r of rows) {
+      const base: Record<string, string> = {
+        mpn: r.mpn, classpath: r.classpath, unspsc: r.unspsc,
+        brand: r.brand, manufacturer: r.manufacturer,
+        invoiceDesc: r.invoiceDesc, mobileDesc: r.mobileDesc,
+        shortDesc: r.shortDesc, longDesc: r.longDesc, retailDesc: r.retailDesc,
+      };
+      const cells = headers.map((h) => {
+        if (h in base) return esc(base[h]);
+        const m = /attr(\d+)_(label|value|uom)/.exec(h);
+        if (m) return esc(r.attributes[Number(m[1]) - 1]?.[(m[2] as "label" | "value" | "uom")] ?? "");
+        return "";
+      });
+      lines.push(cells.join(","));
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "enriched.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  async function post(resPromise: Promise<Response>) {
     setBusy(true);
     setError(null);
+    setRows(null);
     try {
-      const response = await res;
+      const response = await resPromise;
       const body = await response.json().catch(() => ({}));
-      if (!response.ok || !body.id) {
+      if (!response.ok || !body.rows) {
         setError(body.error ?? `Something went wrong (${response.status}).`);
         return;
       }
-      router.push(`/jobs/${body.id}`);
+      setRows(body.rows as JobResultRow[]);
+      setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }), 50);
     } catch {
       setError("Could not reach the server. Try again.");
     } finally {
@@ -36,7 +72,7 @@ export default function EnrichPage() {
 
   async function submitSingle() {
     await post(
-      fetch("/api/jobs", {
+      fetch("/api/enrich", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mpn, description, brand, supplier }),
@@ -47,7 +83,7 @@ export default function EnrichPage() {
   async function submitFile() {
     const form = new FormData();
     if (file) form.append("file", file);
-    await post(fetch("/api/jobs", { method: "POST", body: form }));
+    await post(fetch("/api/enrich", { method: "POST", body: form }));
   }
 
   return (
@@ -117,7 +153,7 @@ export default function EnrichPage() {
               disabled={!mpn.trim() || !description.trim() || busy}
               className="self-start"
             >
-              {busy ? "Starting enrichment..." : "Enrich this row"}
+              {busy ? "Running live enrichment…" : "Enrich now"}
             </Btn>
           </form>
         </Card>
@@ -174,7 +210,30 @@ export default function EnrichPage() {
           </Btn>
         </Card>
       </div>
+    
+      {rows && rows.length > 0 && (
+        <div className="mt-8 flex flex-col gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-fg">
+              Enriched records — {rows.length} row{rows.length === 1 ? "" : "s"}
+            </h2>
+            <Btn onClick={downloadCsv}>Download enriched.csv</Btn>
+          </div>
+          <ul className="flex flex-col gap-3">
+            {rows.map((r) => (
+              <RecordCard key={r.mpn} row={r} />
+            ))}
+          </ul>
+          {rows.some((r) => r.flags.includes("NEEDS_REVIEW")) && (
+            <p className="text-xs text-fg-dim">
+              Rows flagged NEEDS_REVIEW had values the pipeline could not verify
+              against a manufacturer source. They are marked, never invented.
+            </p>
+          )}
+        </div>
+      )}
     </section>
+
   );
 }
 
