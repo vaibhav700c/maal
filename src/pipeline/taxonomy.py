@@ -101,3 +101,142 @@ def apply_unilog_taxonomy(classpath: str | None, item_type: str | None) -> dict:
         "klass": parts[1] if len(parts) > 1 else parts[0] if parts else "",
         "fine": parts[-1] if parts else "",
     }
+
+
+# ---------------------------------------------------------------------------
+# Brand -> corporate parent entity mapping.
+# Source: public corporate ownership records; matches Unilog's own usage
+# (e.g. Frigidaire products list "Rheem Manufacturing" as MANUFACTURER_NAME).
+# ---------------------------------------------------------------------------
+CORPORATE_PARENT: dict[str, str] = {
+    "frigidaire": "Rheem Manufacturing",
+    "whirlpool": "Whirlpool Corporation",
+    "maytag": "Whirlpool Corporation",
+    "kitchenaid": "Whirlpool Corporation",
+    "jenn-air": "Whirlpool Corporation",
+    "amana": "Whirlpool Corporation",
+    "ge": "GE Appliances",
+    "hotpoint": "GE Appliances",
+    "cafe": "GE Appliances",
+    "profile": "GE Appliances",
+    "lg": "LG Electronics",
+    "samsung": "Samsung Electronics",
+    "bosch": "BSH Home Appliances",
+    "thermador": "BSH Home Appliances",
+    "beko": "Arçelik",
+    "element": "Element Electronics",
+    "diablo": "Freud Inc",
+    "freud": "Freud Inc",
+    "milwaukee": "Milwaukee Tool",
+    "makita": "Makita Corporation",
+    "dewalt": "Stanley Black & Decker",
+    "black & decker": "Stanley Black & Decker",
+    "bostitch": "Stanley Black & Decker",
+    "lenox": " Stanley Black & Decker",
+    "irwin": "Irwin Industrial Tools",
+    "satco": "Satco Products Inc",
+    "nuvo": "Satco Products Inc",
+    "kichler": "Kichler Lighting",
+    "leviton": "Leviton Manufacturing",
+    "lutron": "Lutron Electronics",
+    "trex": "Trex Company",
+    "timbertech": "AZEK Building Products",
+    "azek": "AZEK Building Products",
+    "festool": "TTS Tooltechnic Systems",
+    "3m": "3M Company",
+    "paslode": "Illinois Tool Works",
+    "senco": "Senco Brands",
+    "senco products": "Senco Brands",
+}
+
+
+def corporate_parent(brand: str | None) -> str | None:
+    """Look up the corporate parent entity for a brand name."""
+    if not brand:
+        return None
+    low = brand.strip().lower()
+    return CORPORATE_PARENT.get(low)
+
+
+# ---------------------------------------------------------------------------
+# Industry-standard catalog abbreviations (reverse-engineered from Unilog GT).
+# Used by the invoice description builder to pack specs into ≤40 chars.
+# ---------------------------------------------------------------------------
+CATALOG_ABBREVIATIONS: dict[str, str] = {
+    # materials / finishes
+    "stainless steel": "SST",
+    "stainless": "SST",
+    "black on light tan": "BLTLN",
+    "black on white": "BLWH",
+    "black on black": "BLBL",
+    "white on white": "WHWH",
+    "bisque": "BISQ",
+    "black": "BLK",
+    "white": "WHT",
+    "gray": "GRY",
+    "grey": "GRY",
+    "chrome": "CHR",
+    "brushed nickel": "BNKL",
+    "polished nickel": "PNKL",
+    "satin nickel": "SNKL",
+    "vibrant stainless": "VSTL",
+    "spotshield stainless": "SPSTL",
+    # mounting / installation
+    "built-in": "BLTIN",
+    "portable": "PRTBL",
+    "countertop": "CNTRT",
+    "undercounter": "UNDCN",
+    "leg": "LEG",
+    "tile": "TILE",
+    # product types
+    "dishwasher": "DISHWASHER",
+    "refrigerator": "REFRIGERATOR",
+    "dryer": "DRYER",
+    "washer": "WASHER",
+    "microwave": "MICROWAVE",
+    "range": "RANGE",
+}
+
+# GT attribute label ordering — the sequence Unilog expects per category.
+# Used to sort extracted attributes so they appear in the expected positions.
+GT_ATTR_ORDER: dict[str, list[str]] = {
+    "dishwasher": [
+        "Series", "Model", "Number of Wash Cycles", "Voltage Rating",
+        "Amperage Rating", "Mounting Type", "Plug Type", "Size",
+        "Depth With Door Open", "Minimum Height", "Maximum Height",
+        "Sound Level", "Material", "Color", "Additional Information",
+    ],
+    "cut-off wheel": [
+        "Diameter", "Thickness", "Arbor", "Material", "Max RPM",
+        "Application", "Grit",
+    ],
+    "light bulb": [
+        "Wattage", "Color Temperature", "Base Type", "Shape", "Dimmable",
+    ],
+    "_default": [
+        "Series", "Model Number", "Brand Name", "Voltage Rating",
+        "Amperage Rating", "Mounting Type", "Sound Level", "Material",
+        "Color", "Size", "Additional Information",
+    ],
+}
+
+
+def order_attributes(attrs: list, item_type: str) -> list:
+    """Sort attributes to match GT label ordering for this product family."""
+    low_type = (item_type or "").lower()
+    template = None
+    for key, order in GT_ATTR_ORDER.items():
+        if key != "_default" and key in low_type:
+            template = order
+            break
+    if not template:
+        template = GT_ATTR_ORDER["_default"]
+
+    def sort_key(attr):
+        low = attr.label.lower()
+        for i, t in enumerate(template):
+            if t.lower() == low or t.lower() in low:
+                return i
+        return len(template)
+
+    return sorted(attrs, key=sort_key)

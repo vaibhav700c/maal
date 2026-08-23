@@ -67,6 +67,24 @@ def _mount(d):
 def _abbr(v, n):
     return v.replace(" ", "").upper()[:n] if v else None
 
+# Industry-standard catalog abbreviations (from Unilog GT patterns)
+CATALOG_ABBR: dict[str, str] = {
+    "stainless steel": "SST", "stainless": "SST",
+    "black on light tan": "BLTLN",
+    "black on white": "BLWH",
+    "black": "BLK", "white": "WHT", "gray": "GRY", "grey": "GRY",
+    "chrome": "CHR", "brushed nickel": "BNKL", "satin nickel": "SNKL",
+}
+
+def _abbr_catalog(v: str | None) -> str | None:
+    """Look up standard abbreviation first; fall back to truncation."""
+    if not v:
+        return None
+    low = v.lower().strip()
+    if low in CATALOG_ABBR:
+        return CATALOG_ABBR[low]
+    return v.replace(" ", "").upper()[:n] if False else v.replace(" ", "").upper()[:5]
+
 
 # ---------- MOBILE ----------
 def build_mobile_desc(d: DescInput) -> str:
@@ -103,8 +121,8 @@ def build_invoice_desc(d: DescInput) -> str:
     """GT: DISHWASHER BLTLN SST SST 120V 10A 41DBA (≤40 CAPS).
     Packs: TYPE COLOR-ABBR MATERIAL-ABBR VOLTS AMPS SOUND."""
     parts = [d.item_type.upper()]
-    color = _abbr(_get(d, "Color", "Colour", "Finish"), 5)
-    material = _abbr(_get(d, "Material"), 3)
+    color = _abbr_catalog(_get(d, "Color", "Colour", "Finish"))
+    material = _abbr_catalog(_get(d, "Material"))
     volts = _obj(d, "Voltage Rating")
     amps = _obj(d, "Amperage Rating")
     # sound/material/color already handled via _get below

@@ -31,6 +31,10 @@ from pipeline.retrieve import retrieve_by_brand, retrieve_for_row  # noqa: E402
 from pipeline.run_batch import build_output_row, finalize_row  # noqa: E402
 from pipeline.verify_adversarial import verify  # noqa: E402
 
+def _norm(s):
+    return (s or "").replace("®", "").replace("™", "").strip().lower()
+
+
 app = FastAPI(title="Maal Enrichment API", version="1.0.0")
 
 app.add_middleware(
@@ -163,8 +167,8 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
             for c in result.physics.checks
         ]
 
-    # Unilog internal Dept/Class/Fine taxonomy
-    from pipeline.taxonomy import apply_unilog_taxonomy
+    # Unilog internal Dept/Class/Fine taxonomy + corporate parent resolution
+    from pipeline.taxonomy import apply_unilog_taxonomy, corporate_parent, order_attributes
 
     taxo = apply_unilog_taxonomy(
         classification.classpath if classification else None,
@@ -174,6 +178,22 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
         result.output_row["Dept"] = taxo["dept"]
         result.output_row["Class"] = taxo["klass"]
         result.output_row["Fine"] = taxo["fine"]
+
+    # resolve corporate manufacturer from brand lookup table
+    brand_name = result.output_row.get("BRAND_NAME", "")
+    brand_norm = _norm(brand_name)
+    corp = corporate_parent(brand_name.replace("®", "").replace("™", "").strip())
+    if corp:
+        result.output_row["MANUFACTURER_NAME"] = corp
+        if brand_norm == _norm(corp):
+            result.output_row["TRADE_NAME"] = ""
+        else:
+            result.output_row["TRADE_NAME"] = brand_name
+
+    # order attributes to match GT sequence for this product family
+    extraction.attributes = order_attributes(
+        extraction.attributes, extraction.item_type if extraction else ""
+    )
 
     features_list = extraction.features[:15] if extraction else []
     certs_str = "|".join(extraction.certifications) if extraction else ""
