@@ -714,6 +714,10 @@ export async function enrichOne(input: CloudInput): Promise<CloudRow> {
       url: hit?.url ?? null, reviewReason: null,
     });
   }
+  const classData = {
+    classpath: typeof data.classpath === "string" ? data.classpath : "",
+    unspsc: data.unspsc ? String(data.unspsc) : null,
+  };
   const pq = data.package_quantity;
   const pqVal = typeof pq === "object" && pq ? String(pq.value ?? "") : typeof pq === "string" ? pq : "";
   if (pqVal && /^\d+$/.test(pqVal)) {
@@ -744,7 +748,6 @@ export async function enrichOne(input: CloudInput): Promise<CloudRow> {
 
   // 5) descriptions from the verified ledger
   const itemRaw = String(data.item_type ?? "Product");
-  const classData = await classifySafe(itemRaw, clean);
   const descs = buildDescriptions({
     brand: brand ? maybeMark(brand) : null,
     manuf: manufacturer,
@@ -820,23 +823,7 @@ function maybeMark(b: string): string {
   return b.includes("®") || b.includes("™") ? b : `${b}®`;
 }
 
-async function classifySafe(itemType: string, clean: CleanInput): Promise<{ classpath: string; unspsc: string | null }> {
-  try {
-    const data = await geminiJson(
-      `Classify this industrial product into a distributor taxonomy.
-Product: ${clean.description}
-Item type hint: ${itemType}
-Supplier: ${clean.supplierName ?? "unknown"}
-Output STRICT JSON: {"dept":"...","klass":"...","fine":"...","classpath":"Dept > Class > Fine","unspsc":"6 digits or null"}
-Example: {"classpath":"Appliances & Consumer Electronics>Kitchen Appliances>Built-In Dishwashers","unspsc":"42172203"}`,
-      "You are an industrial product taxonomy specialist. Output STRICT JSON only."
-    );
-    if (data?.classpath) {
-      return { classpath: String(data.classpath), unspsc: data.unspsc ? String(data.unspsc) : null };
-    }
-  } catch { /* degrade */ }
-  return { classpath: "", unspsc: null };
-}
+
 
 export async function enrichMany(inputs: CloudInput[], concurrency = 3): Promise<CloudRow[]> {
   const out: CloudRow[] = new Array(inputs.length);
