@@ -56,7 +56,6 @@ PYTHONPATH=src .venv/bin/python -m pipeline.run_batch --input path/to/input.csv 
 PYTHONPATH=src .venv/bin/python -m pipeline.run_batch
 
 # no API key? generate honest demo artifacts offline (input-derived, all flagged UNVERIFIED)
-PYTHONPATH=src .venv/bin/python tools/make_demo_data.py
 ```
 
 Outputs land in `output/`:
@@ -118,7 +117,6 @@ verified, values stay input-derived and flagged, never fabricated.
 ```
 src/pipeline/    enrichment stages, formatters, runner
 web/             Next.js review console
-tools/           offline demo-data generator
 eval/            compliance scorer + offline rescore
 input/           sample dataset + expected-output headers
 docs/            ops runbook, design brief, audit

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getRow } from "@/lib/artifacts";
+import { cleanUrl, getRow } from "@/lib/artifacts";
 import {
   Btn,
   Card,
@@ -243,25 +243,70 @@ export default async function RowPage({
 
           <Card className="p-0">
             <SectionHead>Sourcing</SectionHead>
-            <dl className="px-4 py-3 text-sm">
-              <dt className="text-xs text-fg-faint">Manufacturer domain</dt>
-              <dd className="pb-2 break-all font-mono text-xs text-fg">
-                {retrieval?.mfr_url ?? "not resolved"}
-              </dd>
-              <dt className="text-xs text-fg-faint">Reference documents</dt>
-              <dd className="font-mono text-xs text-fg">
-                {retrieval?.ref_urls?.length ?? 0} on-domain docs
-              </dd>
-              {(retrieval?.flags ?? []).length > 0 && (
-                <dd className="pt-2">
-                  {retrieval!.flags!.map((f) => (
-                    <Chip key={f} tone="warn">
-                      {f.replace(/_/g, " ")}
-                    </Chip>
-                  ))}
-                </dd>
-              )}
-            </dl>
+            {(() => {
+              const mfr = cleanUrl(retrieval?.mfr_url);
+              const product = cleanUrl(retrieval?.product_url) ?? mfr;
+              const refs = (retrieval?.ref_urls ?? [])
+                .map((u) => cleanUrl(u))
+                .filter((u): u is string => !!u);
+              const csvRefs = [1, 2, 3, 4, 5]
+                .map((i) => cleanUrl(csvRow[`Ref URL ${i}`]))
+                .filter((u): u is string => !!u);
+              const allRefs = Array.from(new Set([...refs, ...csvRefs]));
+              if (!product && !allRefs.length) {
+                return (
+                  <p className="px-4 py-3 text-xs text-fg-dim">
+                    No manufacturer page located for this part
+                    {(retrieval?.flags ?? []).length
+                      ? ` — ${(retrieval?.flags ?? []).join(", ").replace(/_/g, " ").toLowerCase()}`
+                      : ""}
+                    . Fields stay unverified rather than invented.
+                  </p>
+                );
+              }
+              return (
+                <dl className="px-4 py-3 text-sm">
+                  <dt className="text-xs text-fg-faint">Product page</dt>
+                  <dd className="pb-2 break-all font-mono text-xs">
+                    {product ? (
+                      <a href={product} target="_blank" rel="noreferrer" className="text-accent underline decoration-accent/40 underline-offset-4 hover:decoration-accent">
+                        {product.length > 60 ? `${product.slice(0, 60)}…` : product}
+                      </a>
+                    ) : (
+                      <span className="text-fg-dim">not located</span>
+                    )}
+                  </dd>
+                  <dt className="text-xs text-fg-faint">Reference documents</dt>
+                  <dd className="font-mono text-xs">
+                    {allRefs.length === 0 ? (
+                      <span className="text-fg-dim">none captured</span>
+                    ) : (
+                      <ul className="flex flex-col gap-1 pt-1">
+                        {allRefs.slice(0, 5).map((u) => (
+                          <li key={u} className="break-all">
+                            <a href={u} target="_blank" rel="noreferrer" className="text-accent underline decoration-accent/40 underline-offset-4 hover:decoration-accent">
+                              {u.length > 70 ? `${u.slice(0, 70)}…` : u}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </dd>
+                  {(retrieval?.flags ?? []).length > 0 && (
+                    <>
+                      <dt className="pt-2 text-xs text-fg-faint">Notes</dt>
+                      <dd className="pt-1">
+                        {retrieval!.flags!.map((f) => (
+                          <Chip key={f} tone="warn">
+                            {f.replace(/_/g, " ")}
+                          </Chip>
+                        ))}
+                      </dd>
+                    </>
+                  )}
+                </dl>
+              );
+            })()}
           </Card>
 
           <Card>

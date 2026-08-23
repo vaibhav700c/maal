@@ -105,6 +105,7 @@ export default async function CatalogPage({
               <th className="px-3 py-2 font-medium">Classpath</th>
               <th className="px-3 py-2 font-medium">Physics</th>
               <th className="w-28 px-3 py-2 font-medium">Confidence</th>
+              <th className="px-3 py-2 font-medium">Product link</th>
               <th className="px-3 py-2 font-medium">Flags</th>
             </tr>
           </thead>
@@ -137,6 +138,23 @@ export default async function CatalogPage({
                   </td>
                   <td className="py-2 px-3 font-mono text-[13px] text-fg">
                     {row.meanConfidence.toFixed(2)}
+                  </td>
+                  <td className="py-2 px-3">
+                    {(row.productUrl || row.mfrUrl) ? (
+                      <a
+                        href={(row.productUrl || row.mfrUrl)!}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={(row.productUrl || row.mfrUrl)!}
+                        className="font-mono text-[12px] text-accent underline decoration-accent/40 underline-offset-4 transition-colors duration-150 ease-out hover:decoration-accent"
+                      >
+                        {row.productUrl
+                          ? "product ↗"
+                          : `maker ↗${row.refCount ? ` ·${row.refCount}` : ""}`}
+                      </a>
+                    ) : (
+                      <span className="text-fg-dim">—</span>
+                    )}
                   </td>
                   <td className="py-2 px-3">
                     <div className="flex flex-wrap gap-1">

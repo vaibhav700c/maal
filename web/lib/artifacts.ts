@@ -8,7 +8,7 @@ export const OUTPUT_DIR =
 export const PROJECT_ROOT = process.env.MAAL_ROOT ?? path.join(process.cwd(), "..");
 
 /** Hosted deployments ship a precomputed snapshot; local runs read live artifacts. */
-export const DEMO_DATA_DIR = path.join(process.cwd(), "demo-data");
+export const SNAPSHOT_DIR = path.join(process.cwd(), "data");
 
 export function isCloud(): boolean {
   return process.env.VERCEL === "1";
@@ -22,10 +22,33 @@ function exists(file: string): boolean {
   }
 }
 
-/** Prefer live local artifacts; fall back to the bundled snapshot. */
+/** Prefer live local artifacts; fall back to the bundled snapshot.
+ * The live dir must contain a substantial catalog (guards against a
+ * clobbered/partial local run shadowing the real snapshot). */
 export function artifactBase(): string {
-  if (exists(path.join(OUTPUT_DIR, "result.csv"))) return OUTPUT_DIR;
-  return DEMO_DATA_DIR;
+  const live = path.join(OUTPUT_DIR, "result.csv");
+  if (exists(live)) {
+    try {
+      if (fs.statSync(live).size > 50_000) return OUTPUT_DIR;
+    } catch {
+      /* fall through */
+    }
+  }
+  return SNAPSHOT_DIR;
+}
+
+/** Legacy runs left literal "https://" placeholders; treat them as absent. */
+export function cleanUrl(u: string | null | undefined): string | null {
+  if (!u) return null;
+  const t = u.trim();
+  if (!t.startsWith("http")) return null;
+  if (/^https?:\/\/?$/.test(t)) return null; // bare scheme, no host
+  try {
+    const host = new URL(t).hostname;
+    return host.includes(".") ? t : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Corrections need a writable location; serverless tmp is ephemeral but works. */
@@ -72,6 +95,7 @@ export type SidecarRecord = {
   retrieval?: {
     domain: string | null;
     mfr_url: string | null;
+    product_url?: string | null;
     ref_urls: string[];
     flags: string[];
   } | null;
@@ -92,6 +116,9 @@ export type QueueRow = {
   classpath: string;
   flags: string[];
   attributeCount: number;
+  productUrl: string | null;
+  mfrUrl: string | null;
+  refCount: number;
 };
 
 function readSidecar(): SidecarRecord[] {
@@ -134,6 +161,9 @@ export function listRows(): QueueRow[] {
       classpath: record.classification?.classpath ?? "",
       flags: record.flags ?? [],
       attributeCount: Object.keys(record.fields ?? {}).length,
+      productUrl: cleanUrl(record.retrieval?.product_url ?? null),
+      mfrUrl: cleanUrl(record.retrieval?.mfr_url ?? null),
+      refCount: (record.retrieval?.ref_urls ?? []).filter(Boolean).length,
     }))
     .sort((a, b) => b.triage - a.triage);
 }
