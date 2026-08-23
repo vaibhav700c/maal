@@ -6,6 +6,7 @@ import {
   isCloud,
   listJobs,
 } from "@/lib/jobs";
+import { enrichMany } from "@/lib/cloud-enrich";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,11 +19,73 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  // On Vercel we run the live TypeScript enrichment engine (up to 5 rows).
   if (isCloud()) {
-    return NextResponse.json(
-      { error: "This hosted deployment serves precomputed results. Clone the repo and run locally to enrich new products." },
-      { status: 501 }
-    );
+    const { enrichMany } = await import("@/lib/cloud-enrich");
+    const contentType0 = request.headers.get("content-type") ?? "";
+    let inputs: Array<{ mpn: string; description: string; brand?: string; supplier?: string }> = [];
+    if (contentType0.includes("multipart/form-data")) {
+      const form = await request.formData();
+      const file = form.get("file");
+      if (!(file instanceof File)) {
+        return NextResponse.json({ error: "No file uploaded." }, { status: 400 });
+      }
+      const text = await file.text();
+      const lines = text.split(/\r?\n/).filter(Boolean);
+      if (lines.length < 2) {
+        return NextResponse.json({ error: "File has no data rows." }, { status: 400 });
+      }
+      const parseLine = (line: string): string[] => {
+        const cells: string[] = [];
+        let cur = "", q = false;
+        for (const ch of line) {
+          if (ch === '"') q = !q;
+          else if (ch === "," && !q) { cells.push(cur); cur = ""; }
+          else cur += ch;
+        }
+        cells.push(cur);
+        return cells;
+      };
+      const headers = parseLine(lines[0]).map((h) => h.trim().toLowerCase());
+      const iMpn = headers.findIndex((h) => ["mfg_part_num","mpn","part number","sku"].includes(h));
+      const iDesc = headers.findIndex((h) => ["part_desc","description","desc","product description","title"].includes(h));
+      const iSup = headers.findIndex((h) => ["part_manuf","manufacturer","supplier","vendor"].includes(h));
+      if (iMpn === -1 || iDesc === -1) {
+        return NextResponse.json(
+          { error: "Need a part-number column and a description column." },
+          { status: 422 }
+        );
+      }
+      for (const line of lines.slice(1)) {
+        const c = parseLine(line);
+        inputs.push({
+          mpn: (c[iMpn] ?? "").trim(),
+          description: (c[iDesc] ?? "").trim(),
+          supplier: iSup >= 0 ? (c[iSup] ?? "").trim() : undefined,
+        });
+      }
+    } else {
+      const body = await request.json().catch(() => ({}));
+      inputs = [{
+        mpn: String(body?.mpn ?? "").trim(),
+        description: String(body?.description ?? "").trim(),
+        brand: body?.brand ? String(body.brand).trim() : undefined,
+        supplier: body?.supplier ? String(body.supplier).trim() : undefined,
+      }];
+    }
+    inputs = inputs.filter((i) => i.mpn || i.description).slice(0, 5);
+    if (!inputs.length) {
+      return NextResponse.json({ error: "Nothing to enrich." }, { status: 400 });
+    }
+    try {
+      const rows = await enrichMany(inputs);
+      return NextResponse.json({ ok: true, rows, count: rows.length });
+    } catch (e: any) {
+      return NextResponse.json(
+        { error: `Enrichment failed: ${e?.message?.slice(0, 160) ?? "unknown"}` },
+        { status: 500 }
+      );
+    }
   }
   const contentType = request.headers.get("content-type") ?? "";
 

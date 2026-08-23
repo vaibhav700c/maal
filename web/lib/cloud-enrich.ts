@@ -11,11 +11,13 @@
 import type { JobResultRow } from "./jobs";
 
 const GEMINI = "https://generativelanguage.googleapis.com/v1beta/models";
-const MODELS = [
-  process.env.GEMINI_MODEL || "gemini-flash-latest",
-  "gemini-3.1-flash-lite",
-  "gemini-flash-lite-latest",
-];
+const MODEL_FALLBACK_ENV = (
+  process.env.GEMINI_MODEL_FALLBACKS || "gemini-3.1-flash-lite,gemini-flash-lite-latest"
+)
+  .split(",")
+  .map((m) => m.trim())
+  .filter(Boolean);
+const MODELS = [process.env.GEMINI_MODEL || "gemini-flash-latest", ...MODEL_FALLBACK_ENV];
 const KEY = process.env.GEMINI_API_KEY || "";
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";

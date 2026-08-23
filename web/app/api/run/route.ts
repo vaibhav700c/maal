@@ -97,7 +97,7 @@ export async function GET() {
 export async function POST(request: Request) {
   if (isCloud()) {
     return NextResponse.json(
-      { error: "Pipeline execution runs locally. This deployment serves precomputed results." },
+      { error: "Full-catalog batch runs locally (serverless time limits). Use the Enrich page here for up to 5 rows live." },
       { status: 501 }
     );
   }
