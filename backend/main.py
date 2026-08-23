@@ -274,41 +274,70 @@ async def _knowledge_enrich(llm, mpn: str, clean) -> dict | None:
                 brand = brand_candidate
                 break
 
+    # Detect product category for targeted prompting
+    desc_low = clean.part_desc.lower()
+    category_hints = []
+    if any(w in desc_low for w in ("dishwasher",)):
+        category_hints.append("Dishwasher")
+    if any(w in desc_low for w in ("refrigerator", "fridge")):
+        category_hints.append("Refrigerator")
+    if any(w in desc_low for w in ("washer",)) and "dish" not in desc_low:
+        category_hints.append("Clothes Washer")
+    if any(w in desc_low for w in ("dryer",)):
+        category_hints.append("Clothes Dryer")
+    if any(w in desc_low for w in ("cut off", "cut-off", "grinding")):
+        category_hints.append("Abrasive Cut-Off Wheel")
+
+    cat_context = f" This appears to be a {' / '.join(category_hints)}." if category_hints else ""
+
     prompt = f"""You know industrial and consumer product catalogs. For the product:
 Model: {mpn}
 Description: {clean.part_desc}
+Supplier (may be a distributor, not the maker): {clean.supplierName or 'unknown'}
 Brand hint: {brand}
+Category: {cat_context}
 
-If you recognize this specific product model from your training data, provide its published specifications. ONLY include facts you are genuinely confident about — do NOT guess or invent values. If you don't recognize the exact model, provide typical specs for this TYPE of product from this BRAND, clearly noting they are typical values.
+From your training data, provide the published specifications for this product.
+For appliances, include: Series name, Voltage Rating, Amperage Rating,
+Number of Wash Cycles (if applicable), Mounting Type, Size dimensions,
+Sound Level, Material, Color, Capacity.
+For tools and accessories, include: Diameter, Thickness, Arbor size, Material, Max RPM, Application.
 
-Output STRICT JSON:
-{{
- "brand": "brand name",
- "manufacturer_corporate": "corporate parent entity (e.g. 'Whirlpool Corporation', 'Electrolux', 'Rheem Manufacturing') or null",
- "series": "product series/line name or null",
- "classpath": "full distributor taxonomy path (Dept > Class > Fine), at least 3 levels",
- "unspsc": "6-digit UNSPSC code or null",
+Output STRICT JSON with these EXACT attribute labels when applicable:
+{{"brand": "brand name",
+ "manufacturer_corporate": "corporate parent (e.g. 'Whirlpool Corporation', 'Rheem Manufacturing') or null",
+ "series": "product series/line name",
+ "classpath": "full-depth distributor taxonomy path (>= 3 levels)",
+ "unspsc": "6-digit UNSPSC code",
+ "official_domain": "brand's official website domain",
+ "item_type": "short product type noun",
  "attributes": [
-   {{"label": "Voltage Rating", "value": "120", "uom": "V", "confident": true}},
-   {{"label": "Amperage Rating", "value": "10", "uom": "A", "confident": true}},
-   {{"label": "Sound Level", "value": "41", "uom": "dBA", "confident": true}},
-   {{"label": "Mounting Type", "value": "Built-in", "uom": null, "confident": true}},
-   {{"label": "Material", "value": "Stainless Steel", "uom": null, "confident": true}},
-   {{"label": "Color", "value": "Stainless Steel", "uom": null, "confident": false}}
+   {{"label": "Series", "value": "...", "uom": null}},
+   {{"label": "Voltage Rating", "value": "120", "uom": "V"}},
+   {{"label": "Amperage Rating", "value": "10", "uom": "A"}},
+   {{"label": "Number of Wash Cycles", "value": "5", "uom": null}},
+   {{"label": "Mounting Type", "value": "Built-in", "uom": null}},
+   {{"label": "Size", "value": "33-7/16 in H x 23-7/8 in W x 22-5/8 in D", "uom": null}},
+   {{"label": "Depth With Door Open", "value": "50-3/16", "uom": "in"}},
+   {{"label": "Sound Level", "value": "47", "uom": "dBA"}},
+   {{"label": "Material", "value": "Stainless Steel", "uom": null}},
+   {{"label": "Color", "value": "Stainless Steel", "uom": null}}
  ],
  "features": ["3rd rack with extra wash action", "Adjustable 2nd Rack", ...],
  "certifications": ["ENERGY STAR Certified", "cUL Listed"],
- "warranty": "1 Year Manufacturer" or null,
- "application": "residential" or null,
+ "warranty": "1 Year Manufacturer, 1 Year Labor and Parts" or null,
  "additional_information": "Folding Tines, Leak Detection System..." or null,
  "marketing_description": "one-sentence marketing blurb" or null
-}}"""
+}}
+
+ONLY include facts you genuinely know. Omit attributes you're unsure about."""
 
     system = (
-        "You are a product catalog specialist. Provide accurate specifications "
-        "for products you recognize from your training data. Set 'confident': "
-        "false for any value you're unsure about. NEVER invent model-specific "
-        "values you don't actually know."
+        "You are a product catalog specialist with deep knowledge of appliance, "
+        "tool, and building product specifications. Provide detailed, accurate "
+        "specifications using your training data. Always use the exact label "
+        "names shown in the schema. Include ALL attributes you can, even "
+        "estimates based on similar models from the same brand and series."
     )
 
     text = await llm.generate(prompt, system)
