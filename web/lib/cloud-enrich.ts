@@ -308,6 +308,46 @@ async function ddgsSearch(query: string): Promise<string[]> {
   return out;
 }
 
+/**
+ * Free reader proxy (https://jina.ai/reader): returns clean markdown for any
+ * URL and defeats the TLS/bot walls that block serverless fetches on sites
+ * like frigidaire.com. Falls back silently when the proxy is unavailable.
+ */
+async function readerFetch(url: string, timeoutMs = 15000): Promise<string | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`https://r.jina.ai/${url}`, {
+      headers: { "User-Agent": UA, Accept: "text/plain" },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return null;
+    const body = await res.text();
+    return body.length > 40 ? body : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Fetch a page's readable text: Jina Reader first, direct fetch fallback. */
+async function pageText(url: string): Promise<string | null> {
+  const viaJina = await readerFetch(url);
+  if (viaJina) return viaJina;
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": UA }, redirect: "follow" });
+    if (!res.ok) return null;
+    const html = await res.text();
+    return html
+      .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ");
+  } catch {
+    return null;
+  }
+}
+
 async function probeUrl(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, { method: "HEAD", headers: { "User-Agent": UA }, redirect: "follow" });
@@ -375,14 +415,9 @@ async function retrieve(
     if (!ret.productUrl && pathLower.includes(mpn.toLowerCase())) ret.productUrl = url;
     const isPdf = pathLower.endsWith(".pdf") || pathLower.includes("/pdf");
     if (candidateRefs.length < 8) candidateRefs.push([isPdf ? 0.9 : 1.0, url]);
-    try {
-      const res = await fetch(url, { headers: { "User-Agent": UA }, redirect: "follow" });
-      if (!res.ok) continue;
-      const html = await res.text();
-      const text = html
-        .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ")
-        .replace(/<[^>]+>/g, " ")
-        .replace(/\s+/g, " ");
+    const text = await pageText(url);
+    if (!text) continue;
+    {
       const lower = text.toLowerCase();
       let idx = lower.indexOf(mpn.toLowerCase());
       let windows = 0;
@@ -391,13 +426,17 @@ async function retrieve(
         windows += 1;
         idx = lower.indexOf(mpn.toLowerCase(), idx + mpn.length);
       }
-      for (const link of html.matchAll(/href="([^"]+\.pdf[^"]*)"/gi)) {
+      // markdown (via Jina) keeps links as [label](url); HTML keeps href=
+      for (const link of [
+        ...text.matchAll(/\(([^)]+\.pdf[^)]*)\)/gi),
+        ...text.matchAll(/href="([^"]+\.pdf[^"]*)"/gi),
+      ]) {
         let pdf = link[1];
         if (pdf.startsWith("/")) pdf = `https://${domain}${pdf}`;
         if (registeredHost(pdf, domain) && candidateRefs.length < 8) candidateRefs.push([0.9, pdf]);
       }
       if (ret.snippets.length >= 4) break;
-    } catch { /* blocked pages are fine — URL still counts */ }
+    }
   }
   ret.refUrls = [...new Set(candidateRefs.sort((a, b) => a[0] - b[0]).map(([, u]) => u))]
     .filter((u) => u !== ret.productUrl)

@@ -51,6 +51,16 @@ export function buildDeliveryRecord(
   // classification
   out["Classpath"] = row.classpath;
   out["UNSPSC"] = row.unspsc;
+  const cpParts = row.classpath.split(">").map((p) => p.trim()).filter(Boolean);
+  if (cpParts.length >= 3) {
+    out["Dept"] = cpParts[0];
+    out["Class"] = cpParts[1];
+    out["Fine"] = cpParts.slice(2).join(" > ");
+  } else if (cpParts.length) {
+    out["Dept"] = cpParts[0];
+  }
+  out["PART_NUMBER"] = echo.mpn;
+  out["Product Name"] = row.shortDesc;
 
   // descriptions — all five formats
   out["MOBILE_DESC"] = row.mobileDesc;
