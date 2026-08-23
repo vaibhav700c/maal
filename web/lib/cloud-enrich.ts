@@ -309,8 +309,15 @@ async function jinaSearch(query: string): Promise<string[]> {
   const target = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`;
   const body = await readerFetch(target, 12000);
   if (!body) return [];
-  const urls = [...body.matchAll(/https?:\/\/[^\s)"\\<>\]]+/g)].map((m) => m[0]);
-  return [...new Set(urls)];
+  const urls: string[] = [];
+  for (const m of body.matchAll(/https?:\/\/[^\s)"\\<>\]]+/g)) {
+    let u = m[0];
+    // DDG wraps results in /l/?uddg=<urlencoded target> — decode to the real URL
+    const uddg = /[?&]uddg=([^&\s]+)/.exec(u);
+    if (uddg) u = decodeURIComponent(uddg[1]);
+    if (!urls.includes(u)) urls.push(u);
+  }
+  return urls;
 }
 
 async function ddgsSearch(query: string): Promise<string[]> {
