@@ -626,6 +626,14 @@ export async function enrichOne(input: CloudInput): Promise<CloudRow> {
     });
   }
 
+  // dedupe: a bare "Size" like 14x1 duplicates structured Diameter/Arbor
+  if (ledger.some((l) => l.label.toLowerCase() === "diameter")) {
+    const sizeIdx = ledger.findIndex(
+      (l) => l.label.toLowerCase() === "size" && /\d\s*[xX]\s*\d/.test(l.value)
+    );
+    if (sizeIdx !== -1) ledger.splice(sizeIdx, 1);
+  }
+
   // physics on numeric attrs
   const checks = physicsChecks(ledger);
   const violated = new Set(checks.filter((c) => c.status === "UNSAT").flatMap((c) => [] as string[]));
