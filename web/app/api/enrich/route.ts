@@ -5,6 +5,7 @@ export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
 const BACKEND = process.env.BACKEND_URL;
+const MAX_ROWS = 3;
 
 export async function POST(request: Request) {
   if (!BACKEND) {
