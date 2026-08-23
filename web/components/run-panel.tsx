@@ -1,151 +1,101 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Btn } from "@/components/ui";
-
-type RunStatus = {
-  running: boolean;
-  pid: number | null;
-  startedAt: string | null;
-  finishedAt: string | null;
-  args: { limit: number; resume: boolean };
-  processed: number;
-  total: number;
-  lastLog: string;
-};
+import { useCallback, useEffect, useState } from "react";
+import { Btn, Card } from "@/components/ui";
+import { useRouter } from "next/navigation";
 
 export default function RunPanel() {
-  const [status, setStatus] = useState<RunStatus | null>(null);
-  const [limit, setLimit] = useState("10");
-  const [resume, setResume] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+  const [rows, setRows] = useState("5");
   const [busy, setBusy] = useState(false);
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [results, setResults] = useState<Array<{ mpn: string; brand: string; classpath: string }>>([]);
 
-  const refresh = useCallback(async () => {
+  async function run() {
+    const n = parseInt(rows, 10) || 5;
+    setBusy(true); setError(null); setResults([]);
     try {
-      const res = await fetch("/api/run", { cache: "no-store" });
-      if (res.ok) setStatus(await res.json());
-    } catch {
-      /* server restarting; ignore */
-    }
-  }, []);
+      // Fetch N rows from the bundled snapshot input
+      const snapshot = await fetch("/data/sample-input.csv");
+      if (!snapshot.ok) throw new Error("Snapshot not available");
+      const text = await snapshot.text();
+      const lines = text.split("\n").filter(Boolean);
+      const header = lines[0].split(",");
 
-  useEffect(() => {
-    void refresh();
-    timer.current = setInterval(refresh, 2500);
-    return () => {
-      if (timer.current) clearInterval(timer.current);
-    };
-  }, [refresh]);
-
-  async function control(method: "POST" | "DELETE") {
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/run", {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: method === "POST" ? JSON.stringify({ limit: Number(limit), resume }) : undefined,
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        setError(body?.error ?? `Failed (${res.status})`);
+      // Parse first N data rows
+      const selected = [];
+      for (let i = 1; i <= n && i < lines.length; i++) {
+        const cells = lines[i].split(",");
+        if (cells.length < 2) continue;
+        selected.push({
+          mpn: cells[0]?.trim(),
+          description: cells[1]?.trim(),
+        });
       }
-      await refresh();
+
+      if (!selected.length) throw new Error("No rows found in dataset");
+
+      // Enrich via the live backend (batch endpoint)
+      const enrichRes = await fetch("/api/enrich-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows: selected }),
+      });
+      const body = await enrichRes.json().catch(() => ({}));
+      if (!enrichRes.ok || body.error) {
+        setError(body.error ?? `Failed (${enrichRes.status})`);
+        return;
+      }
+      setResults(body.rows ?? []);
+    } catch (e: any) {
+      setError(e?.message ?? "Something went wrong.");
     } finally {
       setBusy(false);
     }
   }
 
-  const running = status?.running ?? false;
-  const pct =
-    status && status.total > 0
-      ? Math.min(100, Math.round((status.processed / status.total) * 100))
-      : 0;
-
   return (
-    <div>
-      <div className="flex flex-wrap items-end justify-between gap-4">
+    <Card className="p-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-fg">Run pipeline</h2>
-          <p className="mt-1 text-xs text-fg-dim">
-            Enrich rows from the input dataset. Progress checkpoints every row,
-            safe to stop and resume.
+          <h2 className="text-sm font-semibold text-fg">Live enrichment</h2>
+          <p className="mt-0.5 text-xs text-fg-dim">
+            Re-enrich rows from the sample dataset using the full pipeline.
           </p>
         </div>
-        <form
-          className="flex items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void control("POST");
-          }}
-        >
-          <label className="flex items-center gap-2 font-mono text-[11px] text-fg-dim">
-            rows
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-fg-dim">
+            Rows:
             <input
-              type="number"
-              min={1}
-              max={10000}
-              value={limit}
-              onChange={(e) => setLimit(e.target.value)}
-              disabled={running || busy}
-              className="w-20 rounded-md border border-line bg-surface-2 px-2 py-1 font-mono text-xs text-fg focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
-            />
-          </label>
-          <label className="flex items-center gap-1.5 font-mono text-[11px] text-fg-dim">
-            <input
-              type="checkbox"
-              checked={resume}
-              onChange={(e) => setResume(e.target.checked)}
-              disabled={running || busy}
-              className="accent-accent"
-            />
-            resume
-          </label>
-          {running ? (
-            <button
-              type="button"
-              onClick={() => void control("DELETE")}
+              type="number" min={1} max={10} value={rows}
+              onChange={(e) => setRows(e.target.value)}
               disabled={busy}
-              className="rounded-full border border-bad/50 bg-bad/5 px-4 py-2 font-mono text-xs font-semibold text-bad transition-colors duration-150 ease-out hover:bg-bad/10 disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
-            >
-              Stop run
-            </button>
-          ) : (
-            <Btn type="submit" disabled={busy}>
-              {busy ? "Starting…" : "Run"}
-            </Btn>
-          )}
-        </form>
+              className="ml-1 w-16 rounded border border-line bg-paper px-2 py-1 font-mono text-xs focus:border-accent focus:outline-none"
+            />
+          </label>
+          <Btn onClick={run} disabled={busy}>
+            {busy ? "Enriching…" : "Run"}
+          </Btn>
+        </div>
       </div>
 
-      {(running || (status?.processed ?? 0) > 0) && (
-        <div className="mt-3">
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-line">
-            <div
-              className={`h-full transition-[width] duration-500 ease-out ${running ? "bg-accent" : "bg-ok"}`}
-              style={{ width: `${pct}%` }}
-            />
-          </div>
-          <div className="mt-1.5 flex flex-wrap justify-between gap-2 font-mono text-[10px] text-fg-dim">
-            <span className="inline-flex items-center gap-1.5">
-              {running && (
-                <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
-              )}
-              {running ? "RUNNING" : status?.finishedAt ? "FINISHED" : "IDLE"} ·{" "}
-              {status?.processed ?? 0} / {status?.total ?? 0} rows ({pct}%)
-            </span>
-            {status?.pid && running && <span>pid {status.pid}</span>}
-          </div>
-          {status?.lastLog && (
-            <p className="mt-1 truncate font-mono text-[10px] text-fg-faint" title={status.lastLog}>
-              {status.lastLog}
-            </p>
-          )}
+      {error && <p className="mt-2 text-xs text-bad">{error}</p>}
+
+      {results.length > 0 && (
+        <div className="mt-3 rounded border border-line bg-paper p-3">
+          <p className="text-xs font-medium text-ok">
+            ✅ {results.length} rows enriched
+          </p>
+          <ul className="mt-1 space-y-0.5 font-mono text-[11px] text-fg-dim">
+            {results.map((r) => (
+              <li key={r.mpn}>{r.mpn}: {r.brand || "?"} — {r.classpath?.split(">").pop()?.trim() || "?"}</li>
+            ))}
+          </ul>
+          <p className="mt-1.5 text-[11px] text-fg-dim">
+            Refresh the page to see these in the catalog.
+          </p>
         </div>
       )}
-      {error && <p className="mt-2 text-xs text-bad">{error}</p>}
-    </div>
+    </Card>
   );
 }
