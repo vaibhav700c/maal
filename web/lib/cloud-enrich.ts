@@ -333,19 +333,7 @@ async function readerFetch(url: string, timeoutMs = 15000): Promise<string | nul
 
 /** Fetch a page's readable text: Jina Reader first, direct fetch fallback. */
 async function pageText(url: string): Promise<string | null> {
-  const viaJina = await readerFetch(url);
-  if (viaJina) return viaJina;
-  try {
-    const res = await fetch(url, { headers: { "User-Agent": UA }, redirect: "follow" });
-    if (!res.ok) return null;
-    const html = await res.text();
-    return html
-      .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " ");
-  } catch {
-    return null;
-  }
+  return readerFetch(url);
 }
 
 async function probeUrl(url: string): Promise<string | null> {
@@ -458,7 +446,10 @@ RAW DESCRIPTION: ${input.description}
 SUPPLIER (may be a distributor, not the maker): ${input.supplierName ?? "unknown"}
 
 Output STRICT JSON:
-{"item_type": "short product type noun",
+{"classpath": "Dept > Class > Fine taxonomy path, e.g. Appliances & Consumer Electronics > Kitchen Appliances > Built-In Dishwashers",
+ "unspsc": "6-digit UNSPSC code or null",
+ "official_domain": "the brand's official website domain like example.com (use your knowledge of the brand), or null",
+ "item_type": "short product type noun",
  "series": null,
  "brand": "brand printed on the product OR confidently inferred from the model number (e.g. '3M','Diablo','Leviton','Frigidaire') or null — NOT the supplier",
  "brand_inferred": true if brand came from model-number knowledge rather than text,
@@ -647,8 +638,22 @@ export async function enrichOne(input: CloudInput): Promise<CloudRow> {
   let manufacturer: string | null =
     typeof data.manufacturer === "string" && data.manufacturer.trim() ? data.manufacturer.trim() : clean.supplierName;
 
-  // 3) retrieval on the BRAND domain first (supplier is often a distributor)
-  let retrieval = await retrieve(brand || clean.supplierName || "", mpn, !!brand);
+  const classData = {
+    classpath: typeof data.classpath === "string" ? data.classpath : "",
+    unspsc: data.unspsc ? String(data.unspsc) : null,
+  };
+  const officialDomain =
+    typeof data.official_domain === "string" && data.official_domain.trim()
+      ? data.official_domain.trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0]
+      : null;
+
+  // 3) retrieval on the maker domain declared by the extractor (validated),
+  //    falling back to the brand name, then the supplier
+  let retrieval = await retrieve(
+    officialDomain || brand || clean.supplierName || "",
+    mpn,
+    !!brand || !!officialDomain
+  );
   if (!retrieval.productUrl && !retrieval.refUrls.length && !retrieval.snippets.length && brand !== clean.supplierName) {
     const alt = await retrieve(clean.supplierName || brand || "", mpn, false);
     if (alt.productUrl || alt.snippets.length) Object.assign(retrieval, alt, { flags: [...alt.flags, "SUPPLIER_DOMAIN_FALLBACK"] });
@@ -714,10 +719,6 @@ export async function enrichOne(input: CloudInput): Promise<CloudRow> {
       url: hit?.url ?? null, reviewReason: null,
     });
   }
-  const classData = {
-    classpath: typeof data.classpath === "string" ? data.classpath : "",
-    unspsc: data.unspsc ? String(data.unspsc) : null,
-  };
   const pq = data.package_quantity;
   const pqVal = typeof pq === "object" && pq ? String(pq.value ?? "") : typeof pq === "string" ? pq : "";
   if (pqVal && /^\d+$/.test(pqVal)) {
