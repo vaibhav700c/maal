@@ -109,7 +109,12 @@ def build_invoice_desc(d: DescInput) -> str:
     return _truncate_words(" ".join(p for p in parts if p), INVOICE_LIMIT)
 
 
+def _title(s: str | None) -> str | None:
+    return s.title() if s else s
+
+
 def build_mobile_desc(d: DescInput) -> str:
+    d.item_type = _title(d.item_type) or d.item_type
     head_parts: list[str] = []
     for part in [d.manuf_name, _brand(d)]:
         if part and _norm(part) not in [_norm(p) for p in head_parts]:
@@ -120,10 +125,13 @@ def build_mobile_desc(d: DescInput) -> str:
     )
     if len(out) < MOBILE_MIN and d.attributes:
         skip = {_norm(p) for p in [d.manuf_name, _brand(d), d.mpn, d.item_type] if p}
+        label_block = {"brand name", "model number", "product type"}
         extra = ", ".join(
             attr_text(a)
-            for a in d.attributes[:4]
-            if _norm(a.label) not in skip and _norm(a.value) not in skip
+            for a in d.attributes[:5]
+            if _norm(a.label) not in label_block
+            and _norm(a.label) not in skip
+            and _norm(a.value) not in skip
         )
         if extra:
             out = f"{out}, {extra}"
