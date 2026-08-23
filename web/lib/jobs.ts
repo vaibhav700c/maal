@@ -318,15 +318,42 @@ export function jobArtifacts(id: string): {
   };
 }
 
-/** Enriched preview rows for the job results page. */
-export function jobResults(id: string): Array<{
+export type JobResultRow = {
   mpn: string;
   shortDesc: string;
   longDesc: string;
   classpath: string;
+  unspsc: string;
   brand: string;
-  attributes: Array<{ label: string; value: string; uom: string | null; verdict?: string; confidence?: number; quote?: string | null; url?: string | null }>;
-}> {
+  manufacturer: string;
+  invoiceDesc: string;
+  mobileDesc: string;
+  retailDesc: string;
+  flags: string[];
+  triage: number;
+  physics: Array<{ name: string; status: string; reason: string | null }> | null;
+  retrieval: {
+    mfrUrl: string | null;
+    productUrl: string | null;
+    refUrls: string[];
+    flags: string[];
+  } | null;
+  assets: Record<string, string>;
+  attributes: Array<{
+    label: string;
+    value: string;
+    uom: string | null;
+    verdict?: string;
+    confidence?: number;
+    quote?: string | null;
+    url?: string | null;
+    reviewReason?: string | null;
+  }>;
+};
+
+/** Fully enriched rows for the job results page — everything needed to
+ * inspect a record in-app without downloading anything. */
+export function jobResults(id: string): JobResultRow[] {
   const sidecarFile = path.join(jobDir(id), "sidecar.jsonl");
   const csvFile = path.join(jobDir(id), "result.csv");
   if (!fs.existsSync(sidecarFile)) return [];
@@ -343,19 +370,59 @@ export function jobResults(id: string): Array<{
       return obj;
     });
   }
+  const ASSET_KEYS = [
+    "MFR URL",
+    "Product Image",
+    "Alternate Image 1",
+    "Alternate Image 2",
+    "Specification Sheet",
+    "Actual Image (Yes/No)",
+    "Ref URL 1",
+    "Ref URL 2",
+    "Ref URL 3",
+    "Ref URL 4",
+    "Ref URL 5",
+  ];
   return records.map((rec: Record<string, any>) => {
-    const csvRow =
+    const csvRow: Record<string, string> =
       csvRows.find(
         (r) =>
           r["MANUFACTURER_PART_NUMBER"] === rec.mfg_part_num ||
           r["Mfg_Part_Num"] === rec.mfg_part_num
       ) ?? {};
+    const assets: Record<string, string> = {};
+    for (const key of ASSET_KEYS) {
+      if (csvRow[key]) assets[key] = csvRow[key];
+    }
     return {
       mpn: rec.mfg_part_num,
       shortDesc: csvRow["SHORT_DESC"] ?? "",
-      longDesc: (csvRow["LONG_DESC1"] ?? "").slice(0, 400),
+      longDesc: (csvRow["LONG_DESC1"] ?? "").slice(0, 600),
       classpath: rec.classification?.classpath ?? "",
+      unspsc: csvRow["UNSPSC"] ?? rec.classification?.unspsc ?? "",
       brand: csvRow["BRAND_NAME"] ?? "",
+      manufacturer: csvRow["MANUFACTURER_NAME"] ?? "",
+      invoiceDesc: csvRow["INVOICE_DESC"] ?? "",
+      mobileDesc: csvRow["MOBILE_DESC"] ?? "",
+      retailDesc: csvRow["RETAIL_DESC"] ?? "",
+      flags: rec.flags ?? [],
+      triage: rec.triage_score ?? 0,
+      physics: rec.physics
+        ? rec.physics.checks.map((c: any) => ({
+            name: c.name,
+            status: c.status,
+            reason: c.reason ?? null,
+          }))
+        : null,
+      retrieval: rec.retrieval
+        ? {
+            mfrUrl: rec.retrieval.mfr_url ?? null,
+            productUrl: rec.retrieval.product_url ?? null,
+            refUrls: rec.retrieval.ref_urls ?? [],
+            flags: rec.retrieval.flags ?? [],
+          }
+        : null,
+      assets,
       attributes: Object.entries(
         (rec.fields ?? {}) as Record<string, SidecarField>
       ).map(([label, f]) => ({
@@ -366,6 +433,7 @@ export function jobResults(id: string): Array<{
         confidence: f.confidence,
         quote: f.quote ?? null,
         url: f.source_url ?? null,
+        reviewReason: f.review_reason ?? null,
       })),
     };
   });

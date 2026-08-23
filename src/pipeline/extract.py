@@ -53,6 +53,7 @@ _VOLT_RE = re.compile(r"\b(\d+(?:\.\d+)?)\s?V\b")
 _AMP_RE = re.compile(r"\b(\d+(?:\.\d+)?)\s?A\b")
 _WATT_RE = re.compile(r"\b(\d+(?:\.\d+)?)\s?W\b")
 _GRIT_RE = re.compile(r"\bP(\d{2,4})\b")
+_DISC_HINT = re.compile(r"disc|blade|wheel|cutter|saw|grinder|cut.?off")
 
 
 def _strip_mpn(desc: str) -> str:
@@ -89,6 +90,15 @@ def pre_extract_attributes(desc: str) -> list[Attribute]:
         add("Arbor", dims[1], "in")
     for m in re.finditer(r"(\d+(?:\.\d+)?)\s+ft\b", desc):
         add("Length", m.group(1), "ft")
+    # bare NxM forms without inch quotes: "DBDS14125A01F Diablo 14x1 - Wheel"
+    if not dims and _DISC_HINT.search(desc.lower()):
+        pair = re.findall(
+            r"(\d+(?:\.\d+)?(?:-\d+/\d+)?)\s?[xX]\s?(\d+(?:\.\d+)?(?:-\d+/\d+)?)",
+            desc,
+        )
+        if pair:
+            add("Diameter", pair[0][0], "in")
+            add("Arbor", pair[0][1], "in")
     if m := _VOLT_RE.search(desc):
         add("Voltage Rating", m.group(1), "V")
     if m := _AMP_RE.search(desc):
@@ -149,6 +159,27 @@ MULTI_PROMPT_HEADER = """Extract structured product data for EACH numbered row I
 """ + PROMPT_TEMPLATE.split("Extract structured product data.\n", 1)[1]
 
 
+async def infer_brand(llm, row: CleanRow, extraction: Extraction) -> None:
+    """Focused retry: flash-tier models intermittently skip brand inference."""
+    if extraction.brand:
+        return
+    try:
+        ans = await llm.generate(
+            f"Which retail brand makes the product with model number "
+            f"{row.mfg_part_num} and description '{row.part_desc[:120]}'? "
+            f"Reply with ONLY the brand name (e.g. DeWalt, Diablo, Milwaukee), "
+            f"or NONE if genuinely unknown."
+        )
+        candidate = ans.strip().strip('"').split("\n")[0]
+        if candidate and candidate.upper() != "NONE" and 1 < len(candidate) < 30:
+            extraction.brand = candidate
+            extraction.manufacturer = extraction.manufacturer or (
+                row.mfr_name or None
+            )
+    except Exception:  # noqa: BLE001 - opportunistic
+        pass
+
+
 def _parse_extraction(
     data: dict,
     row: CleanRow,
@@ -171,6 +202,7 @@ def _parse_extraction(
     for pre in pre_extract_attributes(row.part_desc):
         if pre.label.lower() not in merged:
             extraction.attributes.append(pre)
+
     if extraction.brand and "brand" not in merged and "brand name" not in merged:
         inferred = bool(getattr(extraction, "brand_inferred", False))
         extraction.attributes.insert(0, Attribute(
@@ -276,7 +308,9 @@ async def extract(
         ).split("\n", 1)[1]
     )
     data = await llm.generate_json(prompt, SYSTEM)
-    return _parse_extraction(data, row, retrieval)
+    extraction = _parse_extraction(data, row, retrieval)
+    await infer_brand(llm, row, extraction)
+    return extraction
 
 
 def _chunk(items, size):
@@ -314,6 +348,14 @@ async def extract_many(
                 break
             attempts += 1  # one clean retry on an unusable single-shot response
         arr = data if isinstance(data, list) else (data.get("rows") if isinstance(data, dict) else None) or []
+        if (
+            not arr
+            and isinstance(data, dict)
+            and data.get("item_type")
+            and len(chunk) == 1
+        ):
+            # single-row batches often come back as one bare object
+            arr = [dict(data, index=0)]
         by_index: dict[int, dict] = {}
         for position, entry in enumerate(arr):
             if not isinstance(entry, dict):
@@ -326,7 +368,9 @@ async def extract_many(
         for local_i, (row, _cls, ret) in enumerate(chunk):
             parsed = by_index.get(local_i)
             if parsed and isinstance(parsed, dict) and parsed.get("item_type"):
-                results[start + local_i] = _parse_extraction(parsed, row, ret)
+                candidate = _parse_extraction(parsed, row, ret)
+                await infer_brand(llm, row, candidate)
+                results[start + local_i] = candidate
             else:
                 # model skipped the row -> deterministic input-only fallback
                 fallback = Extraction(item_type="Product")
