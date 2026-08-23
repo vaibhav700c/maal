@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="240" viewBox="0 0 1200 240" role="img" aria-label="Maal, provenance-first product intelligence">
+  <rect width="1200" height="240" fill="#0b0d10"/>
+  <!-- constraint-graph motif, right side -->
+  <g stroke="#22d3ee" stroke-opacity="0.28" stroke-width="1">
+    <line x1="820" y1="60" x2="930" y2="110"/>
+    <line x1="930" y1="110" x2="1040" y2="70"/>
+    <line x1="930" y1="110" x2="1000" y2="185"/>
+    <line x1="1040" y1="70" x2="1130" y2="140"/>
+    <line x1="1000" y1="185" x2="1130" y2="140"/>
+    <line x1="820" y1="60" x2="860" y2="170"/>
+    <line x1="860" y1="170" x2="1000" y2="185"/>
+  </g>
+  <line x1="860" y1="170" x2="930" y2="110" stroke="#f87171" stroke-opacity="0.75" stroke-width="1.6"/>
+  <g fill="#e9ecef" fill-opacity="0.85">
+    <circle cx="820" cy="60" r="3"/>
+    <circle cx="930" cy="110" r="3"/>
+    <circle cx="1040" cy="70" r="3"/>
+    <circle cx="1000" cy="185" r="3"/>
+    <circle cx="1130" cy="140" r="3"/>
+    <circle cx="860" cy="170" r="3"/>
+  </g>
+  <!-- brand -->
+  <rect x="64" y="74" width="18" height="18" rx="4" fill="#22d3ee"/>
+  <text x="94" y="92" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="30" font-weight="800" fill="#e9ecef" letter-spacing="-0.5">Maal</text>
+  <text x="64" y="142" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="34" font-weight="800" fill="#e9ecef" letter-spacing="-0.8">Every value earns its place.</text>
+  <text x="64" y="176" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" fill="#97a1ad">Evidence-quoted extraction, adversarial audit, Z3 physics proof, deterministic formatting.</text>
+  <text x="64" y="200" font-family="Consolas, Menlo, monospace" font-size="13" fill="#5c6672">6 raw columns in, 252 delivery columns out, every field with provenance</text>
+</svg>
