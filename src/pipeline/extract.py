@@ -191,6 +191,30 @@ def _parse_extraction(
     return extraction
 
 
+async def infer_brand(llm, row: CleanRow, extraction: Extraction) -> None:
+    """Focused retry: flash-tier models intermittently skip brand inference."""
+    if extraction.brand:
+        return
+    gen = getattr(llm, "generate", None)
+    if gen is None:
+        return
+    try:
+        ans = await gen(
+            f"Which retail brand makes the product with model number "
+            f"{row.mfg_part_num} and description '{row.part_desc[:120]}'? "
+            f"Reply with ONLY the brand name (e.g. DeWalt, Diablo, Milwaukee), "
+            f"or NONE if genuinely unknown."
+        )
+        candidate = ans.strip().strip('"').split("\n")[0]
+        if candidate and candidate.upper() != "NONE" and 1 < len(candidate) < 30:
+            extraction.brand = candidate
+            extraction.manufacturer = extraction.manufacturer or (
+                row.mfr_name or None
+            )
+    except Exception:  # noqa: BLE001 - opportunistic
+        pass
+
+
 def _fill_attributes(extraction, data, row, retrieval):
     seen_labels = set()
     for item in data.get("attributes") or []:
@@ -273,12 +297,22 @@ async def extract_many(
             for i, (row, cls, ret) in enumerate(chunk)
         )
         prompt = MULTI_PROMPT_HEADER + "\nROWS:\n\n" + sections
-        try:
-            data = await llm.generate_json(prompt, SYSTEM)
-        except LLMError as exc:
-            if "invalid JSON" not in str(exc):
-                raise  # quota/network problems must surface, not degrade quality
-            data = []  # malformed model output -> deterministic fallbacks
+        attempts = 0
+        while True:
+            try:
+                data = await llm.generate_json(prompt, SYSTEM)
+            except LLMError as exc:
+                if "invalid JSON" not in str(exc):
+                    raise  # quota/network must surface, not degrade quality
+                data = []
+            usable = bool(data) and (
+                isinstance(data, list)
+                or isinstance(data, dict)
+                and bool(data.get("rows") or data.get("item_type"))
+            )
+            if usable or attempts >= 1:
+                break
+            attempts += 1  # one clean retry on an unusable single-shot response
         arr = data if isinstance(data, list) else (data.get("rows") if isinstance(data, dict) else None) or []
         by_index: dict[int, dict] = {}
         for position, entry in enumerate(arr):
@@ -299,5 +333,6 @@ async def extract_many(
                 _fill_attributes(fallback, {"attributes": []}, row, ret)
                 for pre in pre_extract_attributes(row.part_desc):
                     fallback.attributes.append(pre)
+                await infer_brand(llm, row, fallback)
                 results[start + local_i] = fallback
     return [r for r in results if r is not None]
