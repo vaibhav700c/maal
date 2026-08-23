@@ -300,21 +300,17 @@ function registeredHost(url: string, domain: string): boolean {
 }
 
 /** Jina Search (free): far more reliable from datacenter IPs than HTML scrapes. */
+/**
+ * Search via the free Jina Reader as an egress proxy: it renders the
+ * DuckDuckGo Lite results page from Jina's infrastructure, so datacenter
+ * IP blocks on Vercel don't matter. Returns every http(s) URL found.
+ */
 async function jinaSearch(query: string): Promise<string[]> {
-  const t = withTimeout(12000);
-  try {
-    const res = await fetch(`https://s.jina.ai/${encodeURIComponent(query)}`, {
-      headers: { "User-Agent": UA },
-      signal: t.signal,
-    });
-    t.done();
-    if (!res.ok) return [];
-    const body = await res.text();
-    const urls = [...body.matchAll(/https?:\/\/[^\s)"\\<>\]]+/g)].map((m) => m[0]);
-    return [...new Set(urls)];
-  } catch {
-    return [];
-  }
+  const target = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`;
+  const body = await readerFetch(target, 12000);
+  if (!body) return [];
+  const urls = [...body.matchAll(/https?:\/\/[^\s)"\\<>\]]+/g)].map((m) => m[0]);
+  return [...new Set(urls)];
 }
 
 async function ddgsSearch(query: string): Promise<string[]> {
