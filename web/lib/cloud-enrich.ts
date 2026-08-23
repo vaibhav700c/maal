@@ -92,8 +92,9 @@ async function geminiJson(prompt: string, system: string): Promise<any> {
 }
 
 async function ddgsSiteHit(domain: string, mpn: string): Promise<boolean> {
+  // must go through the Jina proxy too — direct DDG calls are IP-blocked
   try {
-    const hits = await ddgsSearch(`site:${domain} ${mpn}`);
+    const hits = await jinaSearch(`site:${domain} ${mpn}`);
     return hits.some(
       (h) => registeredHost(h, domain) && h.split("?")[0].toLowerCase().includes(mpn.toLowerCase())
     );
