@@ -279,20 +279,30 @@ async def _retrieve(
         # collect docs (PDFs) and supporting owned pages for Ref URL slots
         if len(candidate_refs) < 8:
             candidate_refs.append((0.9 if url.lower().endswith(".pdf") or "/pdf" in url.lower() else (1.0 if tier == 1.0 else 2.0), url))
+        text: str | None = None
         try:
             resp = await http.get(url, timeout=12, follow_redirects=True)
-            if resp.status_code != 200:
-                continue
+            if resp.status_code == 200:
+                text = strip_html(resp.text)
         except httpx.HTTPError:
+            text = None
+        if not text:
+            text = reader_text(url)  # bot-blocked pages stay readable via Jina
+        if not text:
             continue
-        for window in snippet_windows(strip_html(resp.text), part_num):
+        for window in snippet_windows(text, part_num):
             result.snippets.append(Evidence(quote=window, url=url, tier=tier))
         # spec sheets / manuals are usually linked from the product page
-        for link in re.findall(r'href="([^"]+\.pdf[^"]*)"', resp.text, re.I)[:5]:
-            if link.startswith("/"):
-                link = f"https://{domain}{link}"
-            if domain.lower() in link.lower() and len(candidate_refs) < 8:
-                candidate_refs.append((0.9, link))
+        for link in re.findall(r'href="([^"]+\.pdf[^"]*)"', text if "href=" in text else "", re.I)[:0]:
+            pass
+        for link in (re.findall(r'href="([^"]+\.pdf[^"]*)"', resp.text, re.I)[:5] if 'resp' in dir() else []):
+            pass
+        for link_match in re.finditer(r"\[([^\]]*)\]\(([^)]+\.pdf[^)]*)\)", text):
+            pdf = link_match.group(2)
+            if pdf.startswith("/"):
+                pdf = f"https://{domain}{pdf}"
+            if domain.lower() in pdf.lower() and len(candidate_refs) < 8:
+                candidate_refs.append((0.9, pdf))
         if len(result.snippets) >= 4:
             break
     result.product_url = product_page
