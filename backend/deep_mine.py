@@ -201,12 +201,18 @@ async def mine_documents(
         merged = "\n\n---PAGE BREAK---\n\n".join(t for t, _ in texts)
         chunks = chunk_text(merged)[:MAX_CHUNKS_PER_DOC]
 
-        for ci, chunk in enumerate(chunks):
+        # mine all chunks concurrently - the rate limiter paces them, but
+        # the network+generation overlap cuts wall time roughly 3x
+        async def _mine_chunk(ci: int, chunk: str):
             prompt = MINE_PROMPT.replace("{mpn}", mpn).replace("{chunk}", chunk)
             try:
-                data = await llm.generate_json(prompt, MINE_SYSTEM)
+                return ci, await llm.generate_json(prompt, MINE_SYSTEM)
             except Exception:
-                continue
+                return ci, None
+
+        for ci, data in await asyncio.gather(
+            *(_mine_chunk(ci, ch) for ci, ch in enumerate(chunks))
+        ):
             if not isinstance(data, dict):
                 continue
 

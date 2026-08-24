@@ -275,12 +275,25 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
         p.brand or "-- No DIB Brand --",
         p.supplier or "-",
     )
-    # ── Gemini-first: knowledge enrichment BEFORE retrieval ──
+    # ── Gemini-first: knowledge + retrieval are independent -> race them ──
     classification = None
 
-    try:
-        knowledge_data = await _knowledge_enrich(llm(), p.mpn, row)
-    except Exception:
+    async def _safe_knowledge():
+        try:
+            return await _knowledge_enrich(llm(), p.mpn, row)
+        except Exception:
+            return None
+
+    knowledge_data, _retrieval0 = await asyncio.gather(
+        _safe_knowledge(),
+        retrieve_for_row(row, cache=RETRIEVAL_CACHE),
+        return_exceptions=True,
+    )
+    if isinstance(_retrieval0, BaseException):
+        retrieval = RetrievalResult(flags=["NO_MFR_DOMAIN"])
+    else:
+        retrieval = _retrieval0
+    if isinstance(knowledge_data, BaseException):
         knowledge_data = None
 
     if knowledge_data and isinstance(knowledge_data, dict):
@@ -301,7 +314,6 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
         if corp:
             extraction.manufacturer = corp
 
-    retrieval = await retrieve_for_row(row, cache=RETRIEVAL_CACHE)
     extraction = await extract(llm(), row, None, retrieval)
 
     # brand-based second pass when the supplier turned out to be a distributor
@@ -436,15 +448,21 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
         except Exception:
             pass  # opportunistic
 
-    # deep document mining: product page + PDF manuals -> spec attributes
+    # deep document mining: product page + PDF manuals -> spec attributes.
+    # Skipped entirely when extraction already returned a well-evidenced
+    # attribute set - the most expensive stage only runs when needed.
+    _skip_mine = sum(
+        1 for a in (extraction.attributes if extraction else [])
+        if a.verdict == "CONFIRMED" or (a.evidence and a.evidence.tier >= 0.9)
+    ) >= 5
     from backend.deep_mine import mine_documents
 
     try:
         mined_attrs, mined_features, mined_certs = await mine_documents(
             llm(),
             p.mpn,
-            retrieval.ref_urls if retrieval else [],
-            retrieval.product_url if retrieval else None,
+            [] if _skip_mine else (retrieval.ref_urls if retrieval else []),
+            None if _skip_mine else (retrieval.product_url if retrieval else None),
         )
         existing = {a.label.lower() for a in extraction.attributes}
         for attr in mined_attrs:
