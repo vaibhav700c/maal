@@ -99,7 +99,7 @@ async def _grounded_retrieval_fallback(
     # are not evidence even when they describe the product faithfully
     candidates = [u for u in candidates if _is_brand_domain(u)]
     if not candidates:
-        RETRIEVAL_CACHE[key] = {}
+        # no negative caching: a later attempt may ground differently
         return None
 
     # URLs routinely drop prefixes ("3MABR-7100075678" -> ".../7100075678/");
@@ -384,10 +384,8 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
                 )
                 if fallback is not None:
                     retrieval = fallback
-                elif retrieval.flags:
-                    retrieval.flags.extend(
-                        ["SUPPLIER_DOMAIN_EVIDENCE", "NEEDS_REVIEW"]
-                    )
+                else:
+                    retrieval.flags.extend(["SUPPLIER_DOMAIN_EVIDENCE", "NEEDS_REVIEW"])
         except Exception:
             pass  # opportunistic
 

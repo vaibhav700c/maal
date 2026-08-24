@@ -58,14 +58,13 @@ def test_mpn_exact_url_wins_as_product_url(monkeypatch):
     assert out.product_url and "7100075678" in out.product_url
 
 
-def test_all_marketplaces_returns_none_and_caches_empty(monkeypatch):
-    monkeypatch.setitem(RETRIEVAL_CACHE, "grounded::x1", None) if False else None
+def test_all_marketplaces_returns_none_without_negative_cache(monkeypatch):
     cache: dict = {}
     monkeypatch.setattr(__import__("backend.main", fromlist=["RETRIEVAL_CACHE"]), "RETRIEVAL_CACHE", cache)
     backend = GroundedBackend('{"product_url": null}', ["https://ebay.com/itm/123"])
     out = asyncio.run(_grounded_retrieval_fallback(_llm(backend), "X-1", _clean()))
     assert out is None
-    assert cache.get("grounded::x1") == {}  # negative result cached
+    assert "grounded::x1" not in cache  # failures stay retryable
 
 
 def test_backend_without_grounded_support_is_none(monkeypatch):
