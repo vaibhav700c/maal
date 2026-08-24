@@ -473,7 +473,8 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
         try:
             dkey = f"domain::{_norm_key(extraction.brand)}"
             dom = RETRIEVAL_CACHE.get(dkey)
-            if dom is None:
+            if not dom:
+                # never cache failures - a later attempt may resolve
                 text = await llm().generate(
                     "Reply with ONLY the official website domain of the brand "
                     f"{extraction.brand}, in the form example.com - no scheme, "
@@ -481,7 +482,8 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
                 )
                 m = re.search(r"([a-z0-9-]+\.[a-z0-9.-]+)", (text or "").strip(), re.I)
                 dom = m.group(1).lower().rstrip(".") if m else ""
-                RETRIEVAL_CACHE[dkey] = dom
+                if dom:
+                    RETRIEVAL_CACHE[dkey] = dom
             if dom and "." in dom:
                 result.output_row["MFR URL"] = f"https://{dom}"
                 if result.retrieval is not None:
