@@ -48,7 +48,9 @@ class RateLimiter:
         self._last = time.monotonic()
 
 
-async def retry_429(fn, attempts: int = 6):
+async def retry_429(fn, attempts: int = 3):
+    # 2 backoffs (~6s) then give up on THIS model so the failover chain
+    # takes over - waiting 6 rounds here stalled every call under load
     delay = 2.0
     last_exc: Exception | None = None
     for _ in range(attempts):
@@ -68,13 +70,14 @@ async def retry_429(fn, attempts: int = 6):
 
 
 class GeminiBackend:
-    def __init__(self, api_key: str, model: str):
+    def __init__(self, api_key: str, model: str, fallbacks: list[str] | None = None):
         from google import genai
         from google.genai import types
 
         self._types = types
         self._client = genai.Client(api_key=api_key)
         self.model = model
+        self.fallback_models = list(fallbacks or [])
 
     def _contents(self, prompt: str) -> list:
         # typed Content objects avoid the SDK's automatic-function-calling
@@ -94,15 +97,25 @@ class GeminiBackend:
         return resp.text or ""
 
     async def complete_grounded(self, prompt: str, system: str | None = None) -> tuple[str, list[str]]:
-        """Gemini with Google Search grounding. Returns (text, source_urls)."""
+        """Gemini with Google Search grounding, failing over across the same
+        model chain as complete(). Returns (text, source_urls)."""
         config_kwargs = {"tools": [{"google_search": {}}]}
         if system:
             config_kwargs["system_instruction"] = system
         config = self._types.GenerateContentConfig(**config_kwargs)
 
-        resp = await self._client.aio.models.generate_content(
-            model=self.model, contents=self._contents(prompt), config=config
-        )
+        last_exc: Exception | None = None
+        for model in [self.model] + list(getattr(self, "fallback_models", []) or []):
+            try:
+                resp = await self._client.aio.models.generate_content(
+                    model=model, contents=self._contents(prompt), config=config
+                )
+                break
+            except Exception as exc:  # noqa: BLE001 - try next model
+                last_exc = exc
+                continue
+        else:
+            raise LLMError(f"grounded call failed on all models: {last_exc}")
 
         text = resp.text or ""
         urls = []
@@ -194,23 +207,37 @@ class LLMClient:
             settings = Settings.from_env()
         self._settings = settings
         if not settings.model_fallbacks and not backend:
-            # proven working chain when no explicit config is provided
+            # cheap-first chain: start on flash-lite, fall to older-cheaper,
+            # then newest lite, then the alias that tracks current best flash
             settings.model_fallbacks = [
+                "gemini-2.5-flash-lite",
+                "gemini-3.5-flash-lite",
                 "gemini-flash-latest",
-                "gemini-flash-lite-latest",
             ]
             if settings.model == "gemini-2.5-flash":
                 settings.model = "gemini-3.1-flash-lite"
-        self.backend = backend or GeminiBackend(settings.api_key, settings.model)
+        injected_backend = backend is not None
+        if backend is None:
+            backend = GeminiBackend(
+                settings.api_key, settings.model, fallbacks=settings.model_fallbacks
+            )
+        else:
+            backend.fallback_models = list(settings.model_fallbacks)
+        self.backend = backend
         self.limiter = RateLimiter(settings.rpm)
-        self._injected_backend = backend is not None
+        self._injected_backend = injected_backend
         # stub backends stay uncached so tests keep sequencing control
-        self.cache = None if backend is not None else ResponseCache()
+        self.cache = None if injected_backend else ResponseCache()
 
     def _backend_for(self, model: str):
         if self._injected_backend:
             return self.backend
-        return GeminiBackend(self._settings.api_key, model)
+        chain = [self._settings.model] + list(self._settings.model_fallbacks)
+        return GeminiBackend(
+            self._settings.api_key,
+            model,
+            fallbacks=[m for m in chain if m != model],
+        )
 
     async def generate(self, prompt: str, system: str | None = None) -> str:
         cache_key = None

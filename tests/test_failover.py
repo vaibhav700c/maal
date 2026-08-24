@@ -79,3 +79,44 @@ async def test_extract_many_reraises_quota_errors():
         raise SystemExit("should have raised")
     except Exception as exc:
         assert "all models failed" in str(exc)
+
+
+def test_grounded_call_fails_over_to_fallback():
+    import asyncio
+    from pipeline.llm import GeminiBackend
+
+    class FlakyClient:
+        def __init__(self):
+            self.calls = []
+
+        class aio:
+            pass  # placeholder, replaced below
+
+    # build a backend with a stubbed _client whose generate_content fails
+    # on the primary model and succeeds on the fallback
+    b = GeminiBackend.__new__(GeminiBackend)
+    from google.genai import types
+    b._types = types
+    b.model = "primary-lite"
+    b.fallback_models = ["backup-lite"]
+
+    class _Models:
+        def __init__(self):
+            self.calls = []
+
+        async def generate_content(self, model=None, contents=None, config=None):
+            self.calls.append(model)
+            if model == "primary-lite":
+                raise RuntimeError("429 resource_exhausted")
+            class _R:
+                text = '{"ok": true}'
+                candidates = []
+            return _R()
+    models = _Models()
+    b._client = type("C", (), {})()
+    b._client.aio = type("A", (), {})()
+    b._client.aio.models = models
+
+    text, urls = asyncio.run(b.complete_grounded("find it", None))
+    assert text == '{"ok": true}'
+    assert models.calls == ["primary-lite", "backup-lite"]
