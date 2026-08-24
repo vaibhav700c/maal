@@ -110,27 +110,29 @@ export default function EnrichPage() {
 
     if (!allRows.length) { setError("No usable rows found."); setBusy(false); return; }
 
-    // Chunk into groups of 3 and process sequentially
-    const CHUNK = 3;
+    // Process ONE product per API call — avoids serverless timeout
     const accumulated: JobResultRow[] = [];
-    for (let ci = 0; ci < allRows.length; ci += CHUNK) {
-      const chunk = allRows.slice(ci, ci + CHUNK);
-      setProgress(`Enriching rows ${ci + 1}–${Math.min(ci + CHUNK, allRows.length)} of ${allRows.length}…`);
-      const form = new FormData();
-      const csvText = ["Mfg_Part_Num,Part_Desc",
-        ...chunk.map(r => `"${r.mpn}","${r.description.replace(/"/g,'""')}","${r.supplier ?? ""}"`)
-      ].join("\n");
-      const blob = new Blob([csvText], { type: "text/csv" });
-      form.append("file", blob, "chunk.csv");
-      const res = await fetch("/api/enrich", { method: "POST", body: form });
-      const body = await res.json().catch(() => null);
-      if (body?.rows) {
-        accumulated.push(...(body.rows as JobResultRow[]));
-        setRows([...accumulated]);
-        setEchoes(prev => [...(prev ?? []), ...(body.echoes ?? [])]);
+    const accumulatedEchoes: InputEcho[] = [];
+    for (let i = 0; i < allRows.length; i++) {
+      const r = allRows[i];
+      setProgress(`Enriching ${i + 1} of ${allRows.length}: ${r.mpn}…`);
+      try {
+        const res = await fetch("/api/enrich", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(r),
+        });
+        const body = await res.json().catch(() => null);
+        if (body?.rows?.[0]) {
+          accumulated.push(body.rows[0] as JobResultRow);
+          setRows([...accumulated]);
+          }
+      } catch {
+        // skip failed row, continue with next
       }
     }
-    setProgress(null);
+
+    setProgress(`Done — ${accumulated.length} products enriched`);
     setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }), 50);
   }
 
