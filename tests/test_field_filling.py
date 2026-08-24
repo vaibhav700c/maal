@@ -142,3 +142,10 @@ def test_malformed_and_distributor_urls_withheld():
     # valid maker URL still flows through
     row3 = build_output_row(clean, None, RetrievalResult(mfr_url="https://azekexteriors.com/en/p/x"), ext)
     assert row3["MFR URL"] == "https://azekexteriors.com/en/p/x"
+
+
+def test_static_brand_domain_resolution():
+    from backend.main import static_brand_domain
+    assert static_brand_domain("Trex Company") == "trex.com"
+    assert static_brand_domain("Deckorators Inc.") == "deckorators.com"
+    assert static_brand_domain("U S Tape Co") == ""

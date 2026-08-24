@@ -43,6 +43,32 @@ def _norm_key(s: str | None) -> str:
     return re.sub(r"[^a-z0-9]+", "", (s or "").lower())
 
 
+# Deterministic brand -> official-domain map consulted before any LLM call;
+# covers the manufacturers that dominate this catalog.
+BRAND_DOMAINS: dict[str, str] = {
+    "trex": "trex.com", "azek": "azekexteriors.com",
+    "deckorators": "deckorators.com", "timbertech": "timbertech.com",
+    "milwaukee": "milwaukeetool.com", "dewalt": "dewalt.com",
+    "diablo": "diablotools.com", "festool": "festoolusa.com",
+    "schumacher": "schumacherelectric.com", "hunter": "hunterfan.com",
+    "philips": "lighting.philips.com", "signify": "signify.com",
+    "kichler": "kichler.com", "leviton": "leviton.com",
+    "ge": "geappliances.com", "3m": "3m.com", "freud": "freudtools.com",
+    "whirlpool": "whirlpool.com", "samsung": "samsung.com",
+    "lg": "lg.com", "bosch": "boschtools.com", "makita": "makitatools.com",
+    "stanley black & decker": "stanleyblackanddecker.com",
+    "southwire": "southwire.com", "primewire": "primewirecable.com",
+}
+
+
+def static_brand_domain(name: str | None) -> str:
+    n = _norm_key(name)
+    for key, dom in BRAND_DOMAINS.items():
+        if _norm_key(key) and _norm_key(key) in n:
+            return dom
+    return ""
+
+
 async def _grounded_retrieval_fallback(
     llm, mpn: str, clean, brand: str | None = None
 ) -> Optional[RetrievalResult]:
@@ -470,15 +496,24 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
     # last resort for MFR URL: the brand's own domain root. A maker's root
     # site is legitimate manufacturer provenance even when the exact product
     # page cannot be located.
-    if not result.output_row.get("MFR URL") and extraction and extraction.brand:
+    def _static_brand_domain(name: str | None) -> str:
+        return static_brand_domain(name)
+
+    if not result.output_row.get("MFR URL") and extraction and (
+        extraction.brand or extraction.manufacturer
+    ):
         try:
-            dkey = f"domain::{_norm_key(extraction.brand)}"
-            dom = RETRIEVAL_CACHE.get(dkey)
+            name_hint = extraction.brand or re.sub(
+                r"\b(inc|llc|ltd|co|corp|company)\b\.?", "",
+                extraction.manufacturer or "", flags=re.I,
+            )
+            dkey = f"domain::{_norm_key(extraction.brand or extraction.manufacturer)}"
+            dom = _static_brand_domain(name_hint) or RETRIEVAL_CACHE.get(dkey) or ""
             if not dom:
                 # never cache failures - a later attempt may resolve
                 text = await llm().generate(
                     "Reply with ONLY the official website domain of the brand "
-                    f"{extraction.brand}, in the form example.com - no scheme, "
+                    f"{name_hint}, in the form example.com - no scheme, "
                     "no path, no explanation."
                 )
                 m = re.search(r"([a-z0-9-]+\.[a-z0-9.-]+)", (text or "").strip(), re.I)
