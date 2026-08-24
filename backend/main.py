@@ -471,15 +471,8 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
 
     # knowledge-tier source URLs (collected pre-finalize; `result` exists now).
     # A distributor page from grounding must never become MFR URL - leave the
-    # slot open for the brand-domain resolver instead.
-    _supplier_flagged = bool(
-        result.retrieval and "SUPPLIER_DOMAIN_EVIDENCE" in (result.retrieval.flags or [])
-    )
-
-    def _host_ok_url(u: str) -> bool:
-        host = u.split("/")[2] if "://" in u else ""
-        return "." in host and len(host) > 4
-
+    # slot open for the brand-domain resolver instead. _supplier_flagged and
+    # _host_ok_url are defined in the switchboard block below.
     if knowledge_urls:
         for i, u in enumerate(knowledge_urls[:5], 1):
             result.output_row.setdefault(f"Ref URL {i}", u)
@@ -497,8 +490,23 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
             for c in result.physics.checks
         ]
 
+    # provenance policy switchboard: while retrieval is flagged as sitting on
+    # distributor/supplier pages, ONLY the brand-domain resolver below may
+    # claim MFR URL - every other injection is blocked up front.
+    _supplier_flagged = bool(
+        result.retrieval and "SUPPLIER_DOMAIN_EVIDENCE" in (result.retrieval.flags or [])
+    )
+
+    def _host_ok_url(u: str) -> bool:
+        host = u.split("/")[2] if "://" in u else ""
+        return "." in host and len(host) > 4
+
     # Inject LLM-knowledge URLs when retrieval didn't find them
-    if extraction and getattr(extraction, "official_domain", None):
+    if (
+        extraction
+        and not _supplier_flagged
+        and getattr(extraction, "official_domain", None)
+    ):
         existing_mfr = result.output_row.get("MFR URL", "")
         if not existing_mfr or existing_mfr.rstrip("/") in ("https:/", "https://"):
             domain = extraction.official_domain
