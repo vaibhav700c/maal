@@ -132,19 +132,28 @@ export default function EnrichPage() {
     for (let i = 0; i < allRows.length; i++) {
       const r = allRows[i];
       setProgress(`Enriching ${i + 1} of ${allRows.length}: ${r.mpn}…`);
-      try {
-        const res = await fetch("/api/enrich", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(r),
-        });
-        const body = await res.json().catch(() => null);
-        if (body?.rows?.[0]) {
-          accumulated.push(body.rows[0] as JobResultRow);
-          setRows([...accumulated]);
-          }
-      } catch {
-        // skip failed row, continue with next
+      // Retry with backoff — Render's free instance can recycle between
+      // rows; an instant 502 must not silently drop the row.
+      let body: any = null;
+      for (let attempt = 0; attempt < 3 && !body?.rows?.[0]; attempt++) {
+        if (attempt > 0) {
+          setProgress(`Service waking up — retrying ${r.mpn} (attempt ${attempt + 1}/3)…`);
+          await new Promise(res => setTimeout(res, 8000 * attempt));
+        }
+        try {
+          const res = await fetch("/api/enrich", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(r),
+          });
+          body = await res.json().catch(() => null);
+        } catch {
+          body = null;
+        }
+      }
+      if (body?.rows?.[0]) {
+        accumulated.push(body.rows[0] as JobResultRow);
+        setRows([...accumulated]);
       }
     }
 
