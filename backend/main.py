@@ -5,6 +5,7 @@ Deployed on Render (repo root as service root):
     Start:  uvicorn backend.main:app --host 0.0.0.0 --port $PORT
 """
 import asyncio
+import json
 import re
 import sys
 from pathlib import Path
@@ -868,6 +869,7 @@ import time as _time
 import uuid as _uuid
 
 _JOBS: dict[str, dict] = {}
+_JOBS_DIR = ROOT / "output" / "jobs"
 
 
 def _gc_jobs() -> None:
@@ -876,18 +878,43 @@ def _gc_jobs() -> None:
         _JOBS.pop(jid, None)
 
 
+def _job_file(job_id: str):
+    _JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    return _JOBS_DIR / f"{job_id}.json"
+
+
+def _persist_job(job_id: str, payload: dict) -> None:
+    try:
+        _job_file(job_id).write_text(json.dumps(payload))
+    except Exception:
+        pass  # persistence is best-effort; memory remains primary
+
+
 @app.post("/enrich/async")
 async def enrich_async(p: Product) -> dict:
     _gc_jobs()
     job_id = _uuid.uuid4().hex[:12]
     _JOBS[job_id] = {"status": "running", "started": _time.time()}
+    _persist_job(job_id, {"status": "running", "started": _JOBS[job_id]["started"]})
+
+    async def _heartbeat() -> None:
+        while True:
+            _persist_job(job_id, {"status": "running", "hb": _time.time()})
+            await asyncio.sleep(10)
 
     async def _run() -> None:
+        hb = asyncio.create_task(_heartbeat())
         try:
             record, echo = await enrich_product(p)
             _JOBS[job_id].update(status="done", record=record, echo=echo)
+            _persist_job(job_id, {"status": "done", "finished": _time.time()})
+        except asyncio.CancelledError:
+            raise  # process shutdown; job file stays "running" -> stale hb
         except Exception as exc:  # noqa: BLE001 - surfaced via status
             _JOBS[job_id].update(status="error", error=f"{type(exc).__name__}: {exc}")
+            _persist_job(job_id, {"status": "error"})
+        finally:
+            hb.cancel()
 
     asyncio.create_task(_run())
     return {"ok": True, "job_id": job_id}
@@ -897,10 +924,26 @@ async def enrich_async(p: Product) -> dict:
 async def enrich_status(job_id: str) -> dict:
     job = _JOBS.get(job_id)
     if not job:
-        raise HTTPException(status_code=404, detail="unknown or expired job")
+        # process restarted (Render recycles instances between requests);
+        # check the best-effort disk copy, otherwise declare the job lost
+        try:
+            data = json.loads(_job_file(job_id).read_text())
+        except Exception:
+            data = None
+        if data and data.get("status") == "done":
+            return {"ok": True, "status": "done", "note": "restored-from-disk"}
+        return {
+            "ok": False,
+            "status": "lost",
+            "detail": "service restarted before the job finished - safe to retry",
+        }
     if job["status"] == "done":
         record, echo = job["record"], job["echo"]
-        _JOBS.pop(job_id, None)  # one-shot read
+        _JOBS.pop(job_id, None)  # one-shot read from memory
+        try:
+            _job_file(job_id).unlink()
+        except Exception:
+            pass
         return {"ok": True, "status": "done", "rows": [record], "echoes": [echo]}
     if job["status"] == "error":
         detail = job.get("error", "")

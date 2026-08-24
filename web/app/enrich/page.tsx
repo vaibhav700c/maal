@@ -86,9 +86,11 @@ export default function EnrichPage() {
           await new Promise(res => setTimeout(res, 3000));
           const sRes = await fetch(`/api/enrich-status/${jobId}`);
           const sBody = await sRes.json().catch(() => null);
-          if (!sBody || sBody.status === "unreachable") break; // outer retry
+          if (!sBody) break;
           if (sBody.status === "done") return sBody;
           if (sBody.status === "error") throw new Error(sBody.detail || "enrichment error");
+          // service restarted and the job died with it -> retry immediately
+          if (sBody.status === "lost" || sBody.status === "unreachable") break;
         }
       } catch (err) {
         if (err instanceof Error && err.message !== "Failed to fetch") throw err;
