@@ -606,7 +606,27 @@ async def run_batch(
                 except Exception:
                     pass  # opportunistic
 
-        # 2c) canonical manufacturer resolution — supplier strings must not
+        # 2c) grounded-search fallback for rows still without any evidence
+        try:
+            from backend.main import _grounded_retrieval_fallback
+
+            for idx, (r, e, rt) in enumerate(zip(rows_chunk, extractions, retrievals)):
+                if rt is not None and (rt.product_url or rt.ref_urls or rt.snippets):
+                    continue
+                try:
+                    fb = await _grounded_retrieval_fallback(
+                        llm, r.mfg_part_num, r,
+                        e.brand if e else _brand_display(r),
+                    )
+                    if fb is not None:
+                        retrievals[idx] = fb
+                except Exception:  # noqa: BLE001
+                    continue
+            save_cache(retrieval_cache)
+        except ImportError:
+            pass
+
+        # 2d) canonical manufacturer resolution — supplier strings must not
         # leak into MANUFACTURER_NAME; one batched call per chunk at most
         try:
             mfr_map = await resolve_manufacturers(

@@ -5,6 +5,7 @@ Deployed on Render (repo root as service root):
     Start:  uvicorn backend.main:app --host 0.0.0.0 --port $PORT
 """
 import asyncio
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -21,10 +22,11 @@ from pipeline.cleanse import cleanse_row  # noqa: E402
 from pipeline.confidence import apply_scores  # noqa: E402
 from pipeline.config import Settings  # noqa: E402
 from pipeline.extract import extract  # noqa: E402
-from pipeline.llm import LLMClient  # noqa: E402
+from pipeline.llm import LLMClient, parse_json_loose  # noqa: E402
 from pipeline.models import (  # noqa: E402
     Attribute,
     CleanRow,
+    Evidence,
     RetrievalResult,
 )
 from pipeline.physics import run_physics  # noqa: E402
@@ -34,6 +36,104 @@ from pipeline.verify_adversarial import verify  # noqa: E402
 
 def _norm(s):
     return (s or "").replace("®", "").replace("™", "").strip().lower()
+
+
+def _norm_key(s: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (s or "").lower())
+
+
+async def _grounded_retrieval_fallback(
+    llm, mpn: str, clean, brand: str | None = None
+) -> Optional[RetrievalResult]:
+    """Gemini + Google Search grounding as a last-resort retriever.
+
+    DDG/Jina miss JS-only catalogs and obscure MPNs; grounded search still
+    surfaces the maker's own pages. Same sourcing policy as the pipeline:
+    marketplaces excluded, brand-domain URLs tier highest. Cached per MPN.
+    """
+    key = f"grounded::{_norm_key(mpn)}"
+    if RETRIEVAL_CACHE.get(key):
+        rec = RETRIEVAL_CACHE[key]
+        return RetrievalResult(**rec) if isinstance(rec, dict) and rec else None
+
+    backend_obj = getattr(llm, "backend", None)
+    if not (backend_obj and hasattr(backend_obj, "complete_grounded")):
+        return None
+    from pipeline.retrieve import is_marketplace, trust_tier
+
+    prompt = (
+        "Find the manufacturer's OWN web page for this exact product.\n"
+        f"MPN: {mpn}\n"
+        f"Description: {clean.part_desc}\n"
+        f"Brand: {brand or 'unknown'}\n\n"
+        'Output STRICT JSON: {"product_url": "<exact page on the maker\'s '
+        'site, or null>", "ref_urls": [<1-4 spec-sheet/manual URLs on the '
+        "maker's site>]}. Official manufacturer domains only — never "
+        "marketplaces or distributor sites."
+    )
+    system = "You research industrial products with Google Search and cite exact URLs."
+    try:
+        text, grounded_urls = await backend_obj.complete_grounded(prompt, system)
+        data = parse_json_loose(text)
+    except Exception:  # noqa: BLE001 - opportunistic by contract
+        return None
+
+    candidates: list[str] = []
+    for u in [data.get("product_url"), *(data.get("ref_urls") or []), *grounded_urls]:
+        u = str(u or "").strip()
+        if u.startswith("http") and u not in candidates:
+            candidates.append(u)
+    candidates = [u for u in candidates if not is_marketplace(u)]
+    brand_tokens = [
+        t for t in re.split(r"[^a-z0-9]+", (brand or "").lower()) if len(t) >= 2
+    ]
+
+    def _host(u: str) -> str:
+        return u.split("/")[2] if "://" in u else u.split("/")[0]
+
+    def _is_brand_domain(u: str) -> bool:
+        core = ".".join(_host(u).lower().split(".")[-2:])
+        return any(t in core for t in brand_tokens)
+
+    # sourcing policy: manufacturer-owned domains only — distributor pages
+    # are not evidence even when they describe the product faithfully
+    candidates = [u for u in candidates if _is_brand_domain(u)]
+    if not candidates:
+        RETRIEVAL_CACHE[key] = {}
+        return None
+
+    # URLs routinely drop prefixes ("3MABR-7100075678" -> ".../7100075678/");
+    # match on the long digit run when there is one
+    digit_run = re.search(r"\d{6,}", mpn)
+    mpn_keys = [k for k in (_norm_key(mpn), digit_run.group(0) if digit_run else "") if k]
+    exact = next(
+        (
+            c
+            for c in candidates
+            if any(k in _norm_key(c) for k in mpn_keys)
+        ),
+        None,
+    )
+    domain = next((c for c in candidates if _is_brand_domain(c)), None)
+    result = RetrievalResult(flags=["GROUNDED_SEARCH"])
+    if domain:
+        result.domain = _host(domain)
+        result.mfr_url = domain
+    if exact:
+        result.product_url = exact
+    elif domain:
+        result.product_url = domain
+    result.ref_urls = [
+        u for u in candidates if u not in (result.product_url, result.mfr_url)
+    ][:5]
+    # trust tiers per sourcing policy: brand-domain page 1.0 / PDF 0.9 / other 0.5
+    result.snippets = [
+        Evidence(quote="grounded search hit", url=u,
+                 tier=trust_tier(u, result.domain) if _is_brand_domain(u) else 0.5)
+        for u in ([result.product_url] if result.product_url else [])[:1]
+    ]
+    RETRIEVAL_CACHE[key] = result.model_dump()
+    return result
 
 
 app = FastAPI(title="Maal Enrichment API", version="1.0.0")
@@ -188,6 +288,17 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
         if upgraded.product_url or upgraded.ref_urls or upgraded.snippets:
             upgraded.flags.append("BRAND_DOMAIN_LOOKUP")
             retrieval = upgraded
+
+    # last-resort grounded search: DDG/Jina miss JS catalogs & obscure MPNs
+    if not (retrieval.product_url or retrieval.ref_urls or retrieval.snippets):
+        try:
+            fallback = await _grounded_retrieval_fallback(
+                llm(), p.mpn, row, extraction.brand if extraction else p.brand
+            )
+            if fallback:
+                retrieval = fallback
+        except Exception:
+            pass  # opportunistic; empty evidence stays honest
     try:
         from pipeline.retrieve import save_cache
         save_cache(RETRIEVAL_CACHE)
