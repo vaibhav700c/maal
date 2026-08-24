@@ -154,7 +154,7 @@ def corporate_parent(brand: str | None) -> str | None:
     """Look up the corporate parent entity for a brand name."""
     if not brand:
         return None
-    low = brand.strip().lower()
+    low = brand.replace("\u00ae", "").replace("\u2122", "").strip().lower()
     return CORPORATE_PARENT.get(low)
 
 

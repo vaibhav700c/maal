@@ -13,6 +13,9 @@ INVOICE_LIMIT = 40
 MOBILE_MIN = 55
 MOBILE_MAX = 80
 
+# "1.75HP" / "1Ph" / "3pk" -> spaced house style ("1.75 HP", "1 Ph", "3 pk")
+_GLUED_UNIT_RE = re.compile(r"(\d)([A-Za-z]{2,}\b)")
+
 
 @dataclass
 class DescInput:
@@ -67,6 +70,12 @@ def _mount(d):
 def _abbr(v, n):
     return v.replace(" ", "").upper()[:n] if v else None
 
+
+def _with_suffix(value: str, suffix: str) -> str:
+    """Append a unit suffix unless the value already carries it (12V/20V + V)."""
+    v = (value or "").strip()
+    return v if v.upper().endswith(suffix.upper()) else f"{v}{suffix}"
+
 # Industry-standard catalog abbreviations (from Unilog GT patterns)
 CATALOG_ABBR: dict[str, str] = {
     "stainless steel": "SST", "stainless": "SST",
@@ -77,13 +86,17 @@ CATALOG_ABBR: dict[str, str] = {
 }
 
 def _abbr_catalog(v: str | None) -> str | None:
-    """Look up standard abbreviation first; fall back to truncation."""
+    """Look up standard abbreviation first; fall back to a clean truncation."""
     if not v:
         return None
     low = v.lower().strip()
     if low in CATALOG_ABBR:
         return CATALOG_ABBR[low]
-    return v.replace(" ", "").upper()[:n] if False else v.replace(" ", "").upper()[:5]
+    # first alphabetic run only ("High-grade S2..." -> HIGH), never mid-word
+    first_word = re.split(r"[^a-z]+", low, maxsplit=2)[0]
+    if len(first_word) >= 3:
+        return first_word.upper()[:5]
+    return v.replace(" ", "").upper()[:5]
 
 
 # ---------- MOBILE ----------
@@ -98,6 +111,10 @@ def build_mobile_desc(d: DescInput) -> str:
     head = " ".join(head_parts)
 
     pieces = [p for p in [head, d.item_type.title(), d.series, d.mpn] if p]
+    # a series that merely restates the type ("Element Refrigerator" +
+    # Refrigerator) reads as duplication in the mobile line
+    if d.series and d.item_type and d.item_type.lower() in d.series.lower():
+        pieces = [p for p in pieces if p != d.series]
     mount = _mount(d)
     out = ", ".join(pieces)
     if len(out) < MOBILE_MIN and d.attributes:
@@ -113,6 +130,8 @@ def build_mobile_desc(d: DescInput) -> str:
             out += ", " + ", ".join(extras)
     if mount and mount.lower() not in out.lower():
         out += f", {mount}"
+    if len(out) > MOBILE_MAX:
+        out = _trunc(out, MOBILE_MAX)
     return out
 
 
@@ -132,9 +151,9 @@ def build_invoice_desc(d: DescInput) -> str:
     if material: parts.append(material)
     # GT sometimes repeats material abbreviation
     if material and color and color[0] == material[0]: parts.append(material)
-    if volts and volts.value: parts.append(f"{volts.value}V")
-    if amps and amps.value: parts.append(f"{amps.value}A")
-    if sound and sound.value: parts.append(f"{sound.value}DBA")
+    if volts and volts.value: parts.append(_with_suffix(volts.value, "V"))
+    if amps and amps.value: parts.append(_with_suffix(amps.value, "A"))
+    if sound and sound.value: parts.append(_with_suffix(sound.value, "DBA"))
     return _trunc(" ".join(p for p in parts if p), INVOICE_LIMIT)
 
 
@@ -188,7 +207,9 @@ def build_long_desc(d: DescInput) -> str:
         parts.append(sound if "sound level" in sound.lower() else f"{sound} Sound Level")
     if material: parts.append(material)
     if color and color != material: parts.append(material)  # GT repeats material
-    if d.additional: parts.append(f"Additional Information: {d.additional}")
+    if d.additional:
+        additional = _GLUED_UNIT_RE.sub(r"\1 \2", d.additional)
+        parts.append(f"Additional Information: {additional}")
     return ", ".join(p for p in parts if p)[:600]
 
 

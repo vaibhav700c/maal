@@ -62,3 +62,13 @@ def test_write_outputs_roundtrip(tmp_path):
     assert xlsx_path.exists()
     lines = sidecar_path.read_text().strip().splitlines()
     assert len(lines) == 3
+
+
+def test_result_csv_header_fidelity_roundtrip(tmp_path):
+    headers = load_headers(EXPECTED_CSV)
+    rows = [_row(), _row(mpn="WDTS7024RZ")]
+    csv_path, _, _ = write_outputs(rows, tmp_path)
+    with open(csv_path, newline="") as f:
+        written = next(csv.reader(f))
+    assert written == headers
+    assert written[0] == "MFR URL"

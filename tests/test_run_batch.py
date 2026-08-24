@@ -197,3 +197,56 @@ async def test_topup_run_preserves_full_catalog_artifacts(tmp_path, monkeypatch)
     with open(settings.output_dir / "result.csv", newline="") as f:
         body = list(_csv.reader(f))[1:]
     assert len(body) == 3  # A1 + B2 from history + C3 new
+
+
+def test_resolve_manufacturers_static_map_no_llm_call(tmp_path, monkeypatch):
+    from pipeline import run_batch as r
+    monkeypatch.setattr(r, "MFR_CACHE_PATH", tmp_path / "mfr.json")
+    backend = StubBackend([])
+    calls = []
+    original = backend.complete
+    async def spy(prompt, system=None):
+        calls.append(prompt)
+        return await original(prompt, system)
+    backend.complete = spy
+
+    async def run():
+        return await rb.resolve_manufacturers(
+            type("L", (), {"backend": backend})(),
+            [{"mpn": "DBD090", "brand": "Diablo®", "supplier": "Freud Inc (2435)", "desc": "cut off disc"}],
+        )
+    out = asyncio.run(run())
+    assert out.get("DBD090") == "Freud Inc"
+    assert calls == []  # static map resolved it; zero LLM tokens
+
+
+def test_resolve_manufacturers_llm_and_cache(tmp_path, monkeypatch):
+    from pipeline import run_batch as r
+    cache_file = tmp_path / "mfr.json"
+    monkeypatch.setattr(r, "MFR_CACHE_PATH", cache_file)
+    backend = StubBackend([
+        '{"results": [{"mpn": "A1", "manufacturer": "Signify North America Corporation"}]}',
+    ])
+    llm = type("L", (), {"backend": backend})()
+
+    async def first():
+        return await rb.resolve_manufacturers(
+            llm, [{"mpn": "A1", "brand": "Philips", "supplier": "Unknown Dist (X)", "desc": "led bulb"}])
+
+    out1 = asyncio.run(first())
+    assert out1["A1"] == "Signify North America Corporation"
+
+    # second call: served from disk cache, no new LLM call
+    fresh = StubBackend([])
+    llm2 = type("L", (), {"backend": fresh})()
+
+    async def second():
+        return await rb.resolve_manufacturers(
+            llm2, [{"mpn": "A1", "brand": "Philips", "supplier": "Unknown Dist (X)", "desc": "led bulb"}])
+
+    out2 = asyncio.run(second())
+    assert out2["A1"] == "Signify North America Corporation"
+    assert len(fresh.calls) == 0
+
+
+import asyncio

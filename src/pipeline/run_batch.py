@@ -57,6 +57,101 @@ except ImportError:
 
 STATE_PATH_DEFAULT = Path("output/state.jsonl")
 CORRECTIONS_PATH = Path("output/corrections.jsonl")
+MFR_CACHE_PATH = Path("output/cache/manufacturers.json")
+
+
+def _norm_key(s: str | None) -> str:
+    import re as _re
+    return _re.sub(r"[^a-z0-9]+", "", (s or "").lower())
+
+
+def _load_mfr_cache() -> dict:
+    if MFR_CACHE_PATH.exists():
+        try:
+            return json.loads(MFR_CACHE_PATH.read_text())
+        except (json.JSONDecodeError, OSError):
+            return {}
+    return {}
+
+
+def _save_mfr_cache(cache: dict) -> None:
+    MFR_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    MFR_CACHE_PATH.write_text(json.dumps(cache, indent=1))
+
+
+async def resolve_manufacturers(llm, rows_info: list[dict]) -> dict[str, str]:
+    """Map mpn -> canonical legal MANUFACTURER_NAME.
+
+    Order: static corporate-parent map (free) -> disk cache -> ONE batched
+    Gemini call for the remainder. The guide requires master-data-canonical
+    maker names; supplier strings like 'Boise Cascade Building Materials'
+    must never leak into the output.
+    """
+    from pipeline.llm import parse_json_loose
+    from pipeline.taxonomy import corporate_parent
+
+    cache = _load_mfr_cache()
+    out: dict[str, str] = {}
+    need: list[dict] = []
+    for info in rows_info:
+        static = corporate_parent((info.get("brand") or "").replace("®", "").replace("™", ""))
+        if static:
+            out[info["mpn"]] = static
+            continue
+        key = f"{_norm_key(info.get('brand'))}|{_norm_key(info.get('supplier'))}"
+        cached = cache.get(key)
+        if cached:
+            out[info["mpn"]] = cached
+            continue
+        need.append({**info, "_key": key})
+    if not need:
+        return out
+
+    listing = "\n".join(
+        f'- mpn: {i["mpn"]} | brand: {i.get("brand") or "unknown"} | '
+        f'supplier: {i.get("supplier") or "unknown"} | desc: {(i.get("desc") or "")[:80]}'
+        for i in need
+    )
+    prompt = (
+        "You maintain product master data. For each item below, name the "
+        "canonical legal MANUFACTURER (the maker or its corporate parent, "
+        "e.g. 'Freud Inc', 'Signify North America Corporation', 'James Hardie "
+        "Building Products'). The distributor/supplier is NOT the manufacturer "
+        "unless it truly makes the product.\n\n"
+        f"{listing}\n\n"
+        'Output STRICT JSON: {"results": [{"mpn": "...", '
+        '"manufacturer": "..."}]} — empty string when genuinely unknown.'
+    )
+    system = "You are a catalog master-data specialist with deep knowledge of industrial brands."
+    if hasattr(llm, "generate"):
+        try:
+            text = await llm.generate(prompt, system)
+        except Exception:  # noqa: BLE001 - resolution is opportunistic
+            return out
+    else:
+        # minimal client (tests): talk to the raw backend directly
+        backend = getattr(llm, "backend", None)
+        if backend is None:
+            return out
+        try:
+            text = await backend.complete(prompt, system)
+        except Exception:  # noqa: BLE001
+            return out
+    try:
+        data = parse_json_loose(text)
+    except Exception:  # noqa: BLE001
+        return out
+
+    for item in data.get("results") or []:
+        mpn = str(item.get("mpn") or "")
+        name = str(item.get("manufacturer") or "").strip()
+        match = next((i for i in need if i["mpn"] == mpn), None)
+        if not match or not name:
+            continue
+        out[mpn] = name
+        cache[match["_key"]] = name
+    _save_mfr_cache(cache)
+    return out
 
 
 def load_input(path: str | Path, limit: int | None = None) -> list[CleanRow]:
@@ -498,6 +593,32 @@ async def run_batch(
                             ext.manufacturer = corp
                 except Exception:
                     pass  # opportunistic
+
+        # 2c) canonical manufacturer resolution — supplier strings must not
+        # leak into MANUFACTURER_NAME; one batched call per chunk at most
+        try:
+            mfr_map = await resolve_manufacturers(
+                llm,
+                [
+                    {
+                        "mpn": r.mfg_part_num,
+                        "brand": (e.brand if e else None) or _brand_display(r),
+                        "supplier": r.mfr_name,
+                        "desc": r.part_desc,
+                    }
+                    for r, e in zip(rows_chunk, extractions)
+                ],
+            )
+        except Exception:  # noqa: BLE001 - opportunistic
+            mfr_map = {}
+        for r, e in zip(rows_chunk, extractions):
+            canon = mfr_map.get(r.mfg_part_num)
+            if e is None or not canon:
+                continue
+            current = e.manufacturer or ""
+            echoes_supplier = _norm_key(current) in _norm_key(r.mfr_name or "") and bool(current)
+            if not current or echoes_supplier:
+                e.manufacturer = canon
 
         # 3) batched adversarial audit — only rows with evidence consume calls
         try:

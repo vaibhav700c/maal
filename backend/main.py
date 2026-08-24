@@ -175,6 +175,29 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
 
     extraction = await verify(llm(), extraction, retrieval)
 
+    # canonical manufacturer resolution (same as batch pipeline)
+    try:
+        from pipeline.run_batch import resolve_manufacturers
+
+        mfr_map = await resolve_manufacturers(
+            llm(),
+            [{
+                "mpn": p.mpn,
+                "brand": extraction.brand if extraction else p.brand,
+                "supplier": row.mfr_name,
+                "desc": row.part_desc,
+            }],
+        )
+        canon = mfr_map.get(p.mpn)
+        if canon and extraction:
+            current = extraction.manufacturer or ""
+            from pipeline.run_batch import _norm_key
+            echoes = bool(current) and _norm_key(current) in _norm_key(row.mfr_name or "")
+            if not current or echoes:
+                extraction.manufacturer = canon
+    except Exception:
+        pass  # resolution is opportunistic
+
     result = finalize_row(
         row, classification, retrieval, extraction, corrections={}
     )

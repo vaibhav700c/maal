@@ -94,3 +94,40 @@ def test_builders_survive_missing_optionals():
     assert "DISC" in build_invoice_desc(bare)
     assert "X1" in build_mobile_desc(bare)
     assert build_short_desc(bare).startswith("X1 Disc")
+
+
+def test_invoice_no_double_unit_suffix():
+    d = DescInput(
+        brand_display="DeWalt®", manuf_name="Stanley Black & Decker", mpn="DCB1104",
+        item_type="Battery Charger", series=None, feature=None,
+        attributes=[
+            Attribute(label="Voltage Rating", value="12V/20V", uom="V"),
+            Attribute(label="Amperage Rating", value="4", uom="A"),
+        ],
+    )
+    out = build_invoice_desc(d)
+    assert "12V/20VV" not in out.upper()
+    assert "12V/20V" in out.upper() and "4A" in out.upper()
+
+
+def test_mobile_no_series_type_duplication_and_length_cap():
+    d = DescInput(
+        brand_display="Element®", manuf_name="Appliance Dealers Cooperative",
+        mpn="ERFD19CGCS", item_type="Refrigerator",
+        series="Element Refrigerator", feature=None,
+        attributes=[Attribute(label="Mounting Type", value="Freestanding")],
+    )
+    out = build_mobile_desc(d)
+    assert len(out) <= 80
+    assert out.lower().count("refrigerator") == 1
+
+
+def test_long_desc_normalizes_glued_units_in_additional():
+    d = DescInput(
+        brand_display="JET®", manuf_name="JPW Industries", mpn="JT1-549",
+        item_type="Bandsaw", series="JWBS Series", feature=None,
+        attributes=[], additional="Motor is 1.75HP, 1Ph. Blade 137 inches.",
+    )
+    out = build_long_desc(d)
+    assert "1.75HP" not in out and "1Ph" not in out
+    assert "1.75 HP" in out and "1 Ph" in out

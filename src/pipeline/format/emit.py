@@ -41,7 +41,9 @@ CORE_FIELDS = [
 
 
 def load_headers(path: str | Path) -> list[str]:
-    with open(path, newline="") as handle:
+    # utf-8-sig strips any BOM on read; we deliberately WRITE plain utf-8
+    # below because the ground-truth Delivery Format file carries no BOM.
+    with open(path, newline="", encoding="utf-8-sig") as handle:
         return next(csv.reader(handle))
 
 
@@ -114,7 +116,7 @@ def write_outputs(
         matrix.append(merged)
 
     csv_path = outdir / "result.csv"
-    with open(csv_path, "w", newline="", encoding="utf-8-sig") as handle:
+    with open(csv_path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=headers, extrasaction="raise")
         writer.writeheader()
         writer.writerows(matrix)

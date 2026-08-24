@@ -14,7 +14,7 @@ FRACTION_RE = re.compile(r"\b\d+-\d+/\d+\b|\b\d+/\d+\b")
 
 
 def load_rows(path: str | Path) -> tuple[list[str], list[dict]]:
-    with open(path, newline="") as f:
+    with open(path, newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         return list(reader.fieldnames or []), list(reader)
 
