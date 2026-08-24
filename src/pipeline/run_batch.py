@@ -242,6 +242,34 @@ def parse_qty_for_volume(text: str, uom_hint: str | None = None):
     return (value, norm)
 
 
+_SIZE_DIM_RE = re.compile(
+    r"(\d+(?:-\d+/\d+|\.\d+|/\d+)?)\s*(in|ft|mm|cm)?\.?\s*([HWD])\b", re.I
+)
+
+
+def parse_size_dimensions(text: str) -> dict[str, tuple[float, str]]:
+    """'69-7/8 in H x 32-3/4 in W x 36-1/4 in D' ->
+    {'HEIGHT': (69.875, 'in'), 'WIDTH': (32.75, 'in'), 'LENGTH': (36.25, 'in')}.
+    Depth maps to LENGTH (catalog convention); needs at least two dims."""
+    found: dict[str, tuple[float, str]] = {}
+    for m in _SIZE_DIM_RE.finditer(text):
+        num_s, uom, dim = m.group(1), m.group(2), m.group(3).upper()
+        num_s_frac = num_s
+        try:
+            if "/" in num_s_frac:
+                whole, _, frac = num_s_frac.partition("-") if "-" in num_s_frac else ("0", "-", num_s_frac)
+                w = float(whole)
+                n, d = frac.split("/")
+                val = w + float(n) / float(d) if w else float(n) / float(d)
+            else:
+                val = float(num_s_frac)
+        except ValueError:
+            continue
+        col = {"H": "HEIGHT", "W": "WIDTH", "D": "LENGTH"}[dim]
+        found[col] = (val, (uom or "in").lower())
+    return found if len(found) >= 2 else {}
+
+
 def build_output_row(
     row: CleanRow,
     classification,
@@ -389,6 +417,15 @@ def build_output_row(
                     out.setdefault(uom_col, (attr.uom or "").strip())
                 except ValueError:
                     pass
+        # combined Size strings carry the dims; split them into the
+        # dedicated columns unless explicit per-dimension attributes won
+        size_attr = next(
+            (a for a in extraction.attributes if a.label.lower() == "size"), None
+        )
+        if size_attr:
+            for col, (val, uom) in parse_size_dimensions(size_attr.value).items():
+                out.setdefault(col, f"{val:g}")
+                out.setdefault(f"{col}_UOM", uom)
     return {k: v for k, v in out.items() if v != ""}
 
 

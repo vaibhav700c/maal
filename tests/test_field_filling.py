@@ -67,3 +67,20 @@ def test_packaging_and_list_price_fill():
     assert row["Selling UOM"] == "each"
     assert row["Standard Packaging Information"] == "50 each"
     assert row["List Price"] == "1299"
+
+
+def test_combined_size_splits_into_dimension_columns():
+    from pipeline.run_batch import parse_size_dimensions
+    row = build_output_row(_clean(), None, None, _ext([
+        Attribute(label="Size", value="69-7/8 in H x 32-3/4 in W x 36-1/4 in D"),
+    ]))
+    assert row["HEIGHT"] == "69.875" and row["HEIGHT_UOM"] == "in"
+    assert row["WIDTH"] == "32.75"
+    assert row["LENGTH"] == "36.25"  # depth maps to LENGTH
+
+
+def test_size_needs_two_dims_minimum():
+    from pipeline.run_batch import parse_size_dimensions
+    assert parse_size_dimensions("36 in D") == {}
+    dims = parse_size_dimensions("24 in W x 24-1/4 in D")
+    assert dims["WIDTH"] == (24.0, "in") and dims["LENGTH"] == (24.25, "in")
