@@ -80,6 +80,16 @@ UNILOG_TAXONOMY: list[tuple[str, str, str, str]] = [
 # supplier-name based corrections (distributor vs maker disambiguation)
 
 
+def normalize_classpath(classpath: str | None) -> str:
+    """Canonical '>' separator. LLM classifications drift between
+    'A / B / C', 'A > B' and 'A>B'; downstream Dept/Class/Fine splitting
+    only understands '>', so everything normalizes here."""
+    if not classpath:
+        return ""
+    parts = [p.strip() for p in re.split(r"\s*(?:/|>|->)\s*", str(classpath)) if p.strip()]
+    return ">".join(parts)
+
+
 def dept_class_fine(text: str) -> tuple[str | None, str | None, str | None]:
     """Map free text (classpath leaf or description) to internal taxonomy."""
     low = text.lower()
@@ -91,11 +101,11 @@ def dept_class_fine(text: str) -> tuple[str | None, str | None, str | None]:
 
 def apply_unilog_taxonomy(classpath: str | None, item_type: str | None) -> dict:
     """Returns {dept, klass, fine} preferring keyword match over raw parts."""
-    for source in (item_type or "", classpath or ""):
+    for source in (item_type or "", normalize_classpath(classpath)):
         d, k, f = dept_class_fine(source)
         if d:
             return {"dept": d, "klass": k, "fine": f}
-    parts = [p.strip() for p in (classpath or "").split(">") if p.strip()]
+    parts = [p.strip() for p in normalize_classpath(classpath).split(">") if p.strip()]
     return {
         "dept": parts[0] if parts else "",
         "klass": parts[1] if len(parts) > 1 else parts[0] if parts else "",

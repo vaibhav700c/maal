@@ -302,6 +302,8 @@ def build_output_row(
         attributes=extraction.attributes if extraction else [],
         additional=extraction.additional if extraction else None,
     )
+    from pipeline.taxonomy import normalize_classpath
+
     out: dict[str, str] = {
         "MANUFACTURER_NAME": manufacturer,
         "BRAND_NAME": brand or "",
@@ -313,7 +315,7 @@ def build_output_row(
             else ""
         ),
         "MANUFACTURER_PART_NUMBER": row.mfg_part_num,
-        "Classpath": classification.classpath if classification else "",
+        "Classpath": normalize_classpath(classification.classpath if classification else ""),
         "UNSPSC": (classification.unspsc or "") if classification else "",
         "MOBILE_DESC": build_mobile_desc(view),
         "INVOICE_DESC": build_invoice_desc(view),
@@ -453,6 +455,32 @@ def build_output_row(
     return {k: v for k, v in out.items() if v != ""}
 
 
+def dedupe_attribute_variants(extraction) -> None:
+    """Collapse label variants the LLM emits interchangeably
+    ('Pack Quantity' / 'Package Qty' -> 'Package Quantity'), keeping the
+    first occurrence. Runs before physics/scoring so counts stay clean."""
+    canonical = {
+        "pack quantity": "package quantity",
+        "pack qty": "package quantity",
+        "package qty": "package quantity",
+        "qty per package": "package quantity",
+        "colour": "color",
+        "origin": "country of origin",
+        "country of origin ": "country of origin",
+    }
+    seen: set[str] = set()
+    kept = []
+    for attr in extraction.attributes:
+        low = attr.label.lower().strip()
+        low = canonical.get(low, low)
+        if low in seen:
+            continue
+        seen.add(low)
+        attr.label = low.title() if low != "upc" else "UPC"
+        kept.append(attr)
+    extraction.attributes = kept
+
+
 def finalize_row(
     row: CleanRow,
     classification,
@@ -468,6 +496,7 @@ def finalize_row(
     result.retrieval = retrieval
     result.extraction = extraction
     result.classification = classification
+    dedupe_attribute_variants(extraction)
     if extraction.item_type in ("Product", "") and classification:
         leaf = classification.classpath.split(">")[-1].strip()
         extraction.item_type = leaf.rstrip("s") or extraction.item_type or "Product"

@@ -30,7 +30,9 @@ def extract_pdf_text(url: str, timeout: int = 30) -> Optional[str]:
     """Download a PDF and extract text. PyMuPDF primary, pypdf fallback.
     Streams with a hard size cap - unbounded resp.content has OOM-killed
     the 512MB free instance when manufacturers serve huge spec sheets."""
-    max_bytes = 15 * 1024 * 1024
+    import gc
+
+    max_bytes = 8 * 1024 * 1024
     pdf_bytes = b""
     try:
         with httpx.Client(
@@ -41,6 +43,9 @@ def extract_pdf_text(url: str, timeout: int = 30) -> Optional[str]:
             with client.stream("GET", url) as resp:
                 if resp.status_code != 200:
                     return None
+                declared = int(resp.headers.get("content-length") or 0)
+                if declared > max_bytes:
+                    return None  # refuse oversize before reading a byte
                 for chunk in resp.iter_bytes(64 * 1024):
                     pdf_bytes += chunk
                     if len(pdf_bytes) > max_bytes:
@@ -56,9 +61,11 @@ def extract_pdf_text(url: str, timeout: int = 30) -> Optional[str]:
 
         doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
         pages = []
-        for page in doc.pages(0, min(doc.page_count, 40)):
+        for page in doc.pages(0, min(doc.page_count, 25)):
             pages.append(page.get_text("text") or "")
         doc.close()
+        del pdf_bytes
+        gc.collect()
         result = "\n".join(pages).strip()
         if len(result) > 300:
             return result[:400_000]  # cap extracted text for the LLM stage

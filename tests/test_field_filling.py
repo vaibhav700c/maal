@@ -149,3 +149,30 @@ def test_static_brand_domain_resolution():
     assert static_brand_domain("Trex Company") == "trex.com"
     assert static_brand_domain("Deckorators Inc.") == "deckorators.com"
     assert static_brand_domain("U S Tape Co") == ""
+
+
+def test_classpath_separators_normalized():
+    from pipeline.taxonomy import normalize_classpath, apply_unilog_taxonomy
+    assert normalize_classpath("Lighting / Ceiling Fixtures / Chandeliers") == \
+        "Lighting>Ceiling Fixtures>Chandeliers"
+    assert normalize_classpath("Abrasives > Cut-Off Wheels") == "Abrasives>Cut-Off Wheels"
+    # keyword match wins over raw parts (designed Unilog mapping)
+    d = apply_unilog_taxonomy("Lighting / Ceiling Fixtures / Chandeliers", None)
+    assert d["dept"] == "Lighting" and "Chandelier" in d["fine"]
+    # no-keyword classpaths now split correctly on '/' too
+    d2 = apply_unilog_taxonomy("Plumbing / Valves / Ball Valves", None)
+    assert (d2["dept"], d2["klass"], d2["fine"]) == ("Plumbing", "Valves", "Ball Valves")
+
+
+def test_attribute_variant_dedupe():
+    from pipeline.run_batch import dedupe_attribute_variants
+    ext = Extraction(item_type="Bulb", attributes=[
+        {"label": "Package Quantity", "value": "3"},
+        {"label": "Pack Quantity", "value": "3"},
+        {"label": "Color", "value": "Daylight"},
+        {"label": "Colour", "value": "Soft White"},
+    ])
+    dedupe_attribute_variants(ext)
+    labels = [a.label for a in ext.attributes]
+    assert labels.count("Package Quantity") == 1
+    assert labels.count("Color") == 1
