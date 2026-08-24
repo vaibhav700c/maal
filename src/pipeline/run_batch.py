@@ -348,12 +348,24 @@ def build_output_row(
         out["Alternate Image 3"] = f"{brand_file}_{mpn_file}_3.jpg"
         out["Alternate Image 4"] = f"{brand_file}_{mpn_file}_4.jpg"
         out["Specification Sheet"] = f"{brand_file}_{mpn_file}_Specification_Sheet.pdf"
+        out["Instruction/Installation Manual"] = f"{brand_file}_{mpn_file}_Installation_Manual.pdf"
+        out["Owners/User Manual"] = f"{brand_file}_{mpn_file}_Owners_Manual.pdf"
         out["Actual Image (Yes/No)"] = "Yes"
     if extraction:
         if extraction.features:
             out["With"] = f"With {extraction.features[0]}"
         if extraction.certifications:
             out["Standard/Approvals"] = "|".join(extraction.certifications)
+            certs_low = [c.lower() for c in extraction.certifications]
+            if any("rohs" in c for c in certs_low):
+                out.setdefault("RoHS", "RoHS Compliant")
+            if any("energy star" in c for c in certs_low):
+                out.setdefault(
+                    "Energy Star Guide",
+                    f"{re.sub(r'[^A-Za-z0-9]+', '', brand or '').upper()}"
+                    f"_{re.sub(r'[^A-Za-z0-9]+', '', row.mfg_part_num).upper()}"
+                    f"_Energy_Star_Guide.pdf",
+                )
         if extraction.application:
             out["Application"] = extraction.application
         if extraction.includes:
@@ -400,6 +412,8 @@ def build_output_row(
                     )
                 except ValueError:
                     pass
+            elif label_low == "prop 65":
+                out.setdefault("Prop 65", attr.value)
             elif label_low in ("package quantity", "pack quantity") and attr.value.isdigit():
                 out.setdefault("Selling Qty", attr.value)
                 out.setdefault("Selling UOM", "each")

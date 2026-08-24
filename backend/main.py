@@ -632,6 +632,7 @@ Output STRICT JSON with these EXACT attribute labels when applicable:
  ],
   "features": ["3rd rack with extra wash action", "Adjustable 2nd Rack", ...],
   "certifications": ["ENERGY STAR Certified", "cUL Listed"],
+  "prop65": true if this product carries a California Prop 65 warning (common for tools, appliances, adhesives), else false,
   "warranty": "1 Year Manufacturer, 1 Year Labor and Parts" or null,
   "country_of_origin": "e.g. 'USA', 'Germany' or null",
   "upc": "12-digit UPC barcode or null",
@@ -733,6 +734,24 @@ def _merge_knowledge(extraction, data: dict) -> None:
             )
         )
         existing_labels.add("list price")
+
+    # California Prop 65: fill only when genuinely applicable
+    prop65 = data.get("prop65")
+    prop65_hit = bool(prop65) or any(
+        "prop 65" in str(x).lower() for x in extraction.certifications
+    )
+    if prop65_hit and "prop 65" not in existing_labels:
+        extraction.attributes.append(
+            Attribute(
+                label="Prop 65",
+                value="WARNING: Cancer and Reproductive Harm - www.P65Warnings.ca.gov",
+                evidence=None,
+                verdict="UNVERIFIED",
+                confidence=0.55,
+                review_reason="standard warning for this product category",
+            )
+        )
+        existing_labels.add("prop 65")
 
     for item in data.get("attributes") or []:
         label = str(item.get("label") or "").strip()

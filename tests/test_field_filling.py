@@ -84,3 +84,41 @@ def test_size_needs_two_dims_minimum():
     assert parse_size_dimensions("36 in D") == {}
     dims = parse_size_dimensions("24 in W x 24-1/4 in D")
     assert dims["WIDTH"] == (24.0, "in") and dims["LENGTH"] == (24.25, "in")
+
+
+def test_prop65_column_from_attribute():
+    row = build_output_row(_clean(), None, None, _ext([
+        Attribute(label="Prop 65", value="WARNING: Cancer and Reproductive Harm - www.P65Warnings.ca.gov"),
+    ]))
+    assert "P65Warnings.ca.gov" in row["Prop 65"]
+
+
+def test_cert_derived_rohs_and_energy_star():
+    clean = _clean()
+    ext = _ext([]) if False else Extraction(
+        item_type="Charger", brand="DeWalt",
+        attributes=[],
+        certifications=["RoHS Compliant", "ENERGY STAR Certified"],
+    )
+    row = build_output_row(clean, None, None, ext)
+    assert row["RoHS"] == "RoHS Compliant"
+    assert row["Energy Star Guide"] == "DEWALT_WDT750SAKZ_Energy_Star_Guide.pdf"
+
+
+def test_manuals_follow_asset_pattern_only_when_confirmed():
+    from pipeline.models import RetrievalResult
+    clean = _clean()
+    ext = _ext([])
+    ret = RetrievalResult(product_url="https://www.whirlpool.com/p/WDT750SAKZ")
+    row = build_output_row(clean, None, ret, ext)
+    assert row["Instruction/Installation Manual"] == "WHIRLPOOL_WDT750SAKZ_Installation_Manual.pdf"
+    assert row["Owners/User Manual"] == "WHIRLPOOL_WDT750SAKZ_Owners_Manual.pdf"
+    # no evidence -> no speculative assets
+    row2 = build_output_row(clean, None, None, ext)
+    assert "Instruction/Installation Manual" not in row2
+
+
+def test_with_and_approvals_stay_blank_without_data():
+    row = build_output_row(_clean(), None, None, _ext([]))
+    assert "With" not in row
+    assert "Standard/Approvals" not in row
