@@ -528,6 +528,20 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
     features_list = extraction.features[:15] if extraction else []
     certs_str = "|".join(extraction.certifications) if extraction else ""
 
+    # final provenance gate - EVERY injection path funnels through here:
+    # malformed hosts never ship; distributor evidence is withheld entirely
+    mfr = result.output_row.get("MFR URL", "")
+    if mfr:
+        host = mfr.split("/")[2] if "://" in mfr else ""
+        if not ("." in host and len(host) > 4):
+            result.output_row.pop("MFR URL", None)
+    if result.retrieval is not None and "SUPPLIER_DOMAIN_EVIDENCE" in (
+        result.retrieval.flags or []
+    ):
+        result.output_row.pop("MFR URL", None)
+        for k in [k for k in result.output_row if k.startswith("Ref URL")]:
+            result.output_row.pop(k, None)
+
     record = {
         "mpn": result.mfg_part_num,
         "shortDesc": result.output_row.get("SHORT_DESC", ""),
