@@ -270,8 +270,10 @@ class LLMClient:
             except DailyQuotaError as exc:
                 errors.append(f"{model}: daily quota")
                 continue
-            except LLMError as exc:
-                errors.append(f"{model}: {exc}")
+            except Exception as exc:  # noqa: BLE001 - any per-model failure
+                # (rate limits, 404 model-not-found, SDK ClientError) must
+                # slide down the chain instead of escaping the loop
+                errors.append(f"{model}: {type(exc).__name__}: {str(exc)[:120]}")
                 continue
         raise LLMError("all models failed -> " + " | ".join(errors))
 
