@@ -630,11 +630,16 @@ Output STRICT JSON with these EXACT attribute labels when applicable:
    {{"label": "Material", "value": "Stainless Steel", "uom": null}},
    {{"label": "Color", "value": "Stainless Steel", "uom": null}}
  ],
- "features": ["3rd rack with extra wash action", "Adjustable 2nd Rack", ...],
- "certifications": ["ENERGY STAR Certified", "cUL Listed"],
- "warranty": "1 Year Manufacturer, 1 Year Labor and Parts" or null,
- "additional_information": "Folding Tines, Leak Detection System..." or null,
- "marketing_description": "one-sentence marketing blurb" or null
+  "features": ["3rd rack with extra wash action", "Adjustable 2nd Rack", ...],
+  "certifications": ["ENERGY STAR Certified", "cUL Listed"],
+  "warranty": "1 Year Manufacturer, 1 Year Labor and Parts" or null,
+  "country_of_origin": "e.g. 'USA', 'Germany' or null",
+  "upc": "12-digit UPC barcode or null",
+  "gtin": "14-digit GTIN or null",
+  "ean": "13-digit EAN or null",
+  "list_price": "MSRP as a number, no currency symbol, or null",
+  "additional_information": "Folding Tines, Leak Detection System..." or null,
+  "marketing_description": "one-sentence marketing blurb" or null
 }}
 
 ONLY include facts you genuinely know. Omit attributes you're unsure about."""
@@ -685,6 +690,49 @@ def _merge_knowledge(extraction, data: dict) -> None:
     kbrand = str(data.get("brand") or "").strip()
     if kbrand and not getattr(extraction, "brand", None):
         extraction.brand = kbrand
+
+    # scalar catalog fields the Delivery Format expects; become real
+    # attributes so provenance/verdict flow through like everything else
+    for json_key, label in (
+        ("warranty", "Warranty"),
+        ("country_of_origin", "Country of Origin"),
+        ("upc", "UPC"),
+        ("gtin", "GTIN"),
+        ("ean", "EAN"),
+    ):
+        raw = data.get(json_key)
+        value = str(raw).strip() if raw is not None else ""
+        if value and value.lower() not in ("null", "none", "n/a"):
+            label_low = label.lower()
+            if label_low not in existing_labels:
+                extraction.attributes.append(
+                    Attribute(
+                        label=label,
+                        value=value,
+                        evidence=None,
+                        verdict="UNVERIFIED",
+                        confidence=0.45,
+                        review_reason="knowledge-inferred from model-code analysis",
+                    )
+                )
+                existing_labels.add(label_low)
+    lp = data.get("list_price")
+    try:
+        price_val = float(str(lp).replace("$", "").replace(",", ""))
+    except (TypeError, ValueError):
+        price_val = None
+    if price_val and "list price" not in existing_labels:
+        extraction.attributes.append(
+            Attribute(
+                label="List Price",
+                value=f"{price_val:g}",
+                evidence=None,
+                verdict="UNVERIFIED",
+                confidence=0.40,
+                review_reason="knowledge-inferred from model-code analysis",
+            )
+        )
+        existing_labels.add("list price")
 
     for item in data.get("attributes") or []:
         label = str(item.get("label") or "").strip()

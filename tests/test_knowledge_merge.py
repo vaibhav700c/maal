@@ -50,3 +50,23 @@ def test_merge_keeps_existing_brand():
     ext = Extraction(item_type="Disc", brand="Diablo")
     _merge_knowledge(ext, {"attributes": [], "brand": "Freud"})
     assert ext.brand == "Diablo"
+
+
+def test_merge_fills_warranty_origin_barcodes():
+    ext = Extraction(item_type="Dishwasher")
+    _merge_knowledge(ext, {
+        "attributes": [],
+        "warranty": "1 Year Limited",
+        "country_of_origin": "USA",
+        "upc": "883049498227",
+    })
+    labels = {a.label: a.value for a in ext.attributes}
+    assert labels["Warranty"] == "1 Year Limited"
+    assert labels["Country of Origin"] == "USA"
+    assert labels["UPC"] == "883049498227"
+
+
+def test_merge_ignores_null_sentinels():
+    ext = Extraction(item_type="Disc")
+    _merge_knowledge(ext, {"attributes": [], "warranty": "null", "upc": None})
+    assert not [a for a in ext.attributes if a.label in ("Warranty", "UPC")]

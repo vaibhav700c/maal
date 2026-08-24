@@ -58,6 +58,8 @@ Output STRICT JSON:
   "warranty": "warranty statement with its verbatim quote, or null",
   "country_of_origin": "e.g. 'USA', 'Germany' — only if a source states it, else null",
   "upc": "12-digit UPC barcode ONLY if printed in a source, else null",
+  "ean": "13-digit EAN barcode ONLY if printed in a source, else null",
+  "gtin": "14-digit GTIN ONLY if printed in a source, else null",
   "package_quantity": "count per package as plain number (e.g. 10 for '10pc', 50 for '50 Disc/Box') with quote, or null",
   "additional": "misc specs sentence or null"}}
 
@@ -222,6 +224,8 @@ def _parse_extraction(
         ("warranty", "Warranty"),
         ("country_of_origin", "Country of Origin"),
         ("upc", "UPC"),
+        ("ean", "EAN"),
+        ("gtin", "GTIN"),
     ):
         value = data.get(json_key)
         if value and str(value).strip() and str(value).lower() != "null":

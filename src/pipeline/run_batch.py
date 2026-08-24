@@ -222,6 +222,26 @@ def _brand_display(row: CleanRow) -> str | None:
     return row.dib_brand or row.unilog_brand or row.e1_brand or row.mfr_name
 
 
+def parse_qty_for_volume(text: str, uom_hint: str | None = None):
+    """'24.8 cu ft' / '24.8' + 'cu ft' -> (24.8, 'cu ft'); None otherwise."""
+    from pipeline.physics import parse_qty
+
+    parsed = parse_qty(text)
+    if parsed is None:
+        return None
+    value, uom = parsed
+    uom = (uom or uom_hint or "").strip().lower()
+    aliases = {
+        "cu ft": "cu ft", "cuft": "cu ft", "ft3": "cu ft",
+        "cubic feet": "cu ft", "l": "L", "liter": "L", "liters": "L",
+        "gal": "gal", "gallon": "gal", "gallons": "gal",
+    }
+    norm = aliases.get(uom)
+    if norm is None and value > 0:
+        return None  # a bare number with no unit is ambiguous for volume
+    return (value, norm)
+
+
 def build_output_row(
     row: CleanRow,
     classification,
@@ -325,16 +345,43 @@ def build_output_row(
         }
         for attr in extraction.attributes:
             label_low = attr.label.lower()
+            digits = attr.value.replace(" ", "")
             if label_low == "warranty":
                 out.setdefault("Warranty", attr.value)
                 out.setdefault("Warranty Information", attr.value)
             elif label_low == "country of origin":
                 out.setdefault("Country Of Origin", attr.value)
-            elif label_low == "upc" and attr.value.isdigit():
-                out.setdefault("UPC", attr.value)
+            elif label_low == "upc" and len(digits) == 12 and digits.isdigit():
+                out.setdefault("UPC", digits)
+            elif label_low == "ean" and len(digits) == 13 and digits.isdigit():
+                out.setdefault("EAN", digits)
+            elif label_low == "gtin" and len(digits) == 14 and digits.isdigit():
+                out.setdefault("GTIN", digits)
+            elif label_low in ("barcode",) and digits.isdigit():
+                # route by length when the source did not name the standard
+                if len(digits) == 12:
+                    out.setdefault("UPC", digits)
+                elif len(digits) == 13:
+                    out.setdefault("EAN", digits)
+                elif len(digits) == 14:
+                    out.setdefault("GTIN", digits)
+            elif label_low == "list price":
+                try:
+                    out.setdefault(
+                        "List Price", f"{float(attr.value.replace('$', '').replace(',', '')):g}"
+                    )
+                except ValueError:
+                    pass
             elif label_low in ("package quantity", "pack quantity") and attr.value.isdigit():
                 out.setdefault("Selling Qty", attr.value)
                 out.setdefault("Selling UOM", "each")
+                out.setdefault("Standard Packaging Information", f"{attr.value} each")
+            elif label_low in ("capacity", "volume"):
+                parsed = parse_qty_for_volume(attr.value, attr.uom)
+                if parsed:
+                    vol, uom = parsed
+                    out.setdefault("VOLUME", f"{vol:g}")
+                    out.setdefault("VOLUME_UOM", uom)
             elif label_low in DIM_MAP:
                 col, uom_col = DIM_MAP[label_low]
                 try:
