@@ -338,9 +338,27 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
     if knowledge_data:
         _merge_knowledge(extraction, knowledge_data)
         knowledge_urls = [u for u in (knowledge_data.get("source_urls") or []) if u]
+        # a corporate parent must share identity with the product evidence;
+        # weak fallback models hallucinate giants ('GE' for a Prime timer)
+        def _sig_words(s: str) -> set[str]:
+            return {
+                w for w in re.split(r"[^a-z0-9]+", str(s).lower())
+                if len(w) >= 4 and not w.isdigit()
+            }
+
         corp = knowledge_data.get("manufacturer_corporate")
-        if corp and extraction.manufacturer in (None, "", row.mfr_name):
-            extraction.manufacturer = corp
+        if corp:
+            evidence_words = _sig_words(
+                f"{extraction.brand or ''} {row.mfr_name or ''} {row.part_desc}"
+            )
+            corp_words = _sig_words(corp)
+            plausible = (
+                not extraction.brand  # brand unknown -> corp is a free guess
+                or not corp_words
+                or bool(corp_words & evidence_words)
+            )
+            if plausible and extraction.manufacturer in (None, "", row.mfr_name):
+                extraction.manufacturer = str(corp)
         # a brand that merely restates the supplier is not a brand
         from pipeline.run_batch import brand_echoes_supplier
 

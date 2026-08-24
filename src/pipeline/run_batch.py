@@ -286,6 +286,9 @@ def build_output_row(
         brand = _brand_display(row)
         if extraction:
             extraction.brand = None
+    # supplier codes ride along in brand fields ('Prime Wire & Cable (3562)')
+    if brand:
+        brand = re.sub(r"\s*\([A-Za-z0-9]{2,6}\)\s*$", "", brand).strip() or brand
     # model casing wobble ('AZEK' vs 'Azek'); true acronyms (GE, 3M) survive
     if brand and len(brand) > 3 and brand.isupper() and brand.isalpha():
         brand = brand.title()

@@ -176,3 +176,22 @@ def test_attribute_variant_dedupe():
     labels = [a.label for a in ext.attributes]
     assert labels.count("Package Quantity") == 1
     assert labels.count("Color") == 1
+
+
+def test_brand_supplier_code_stripped():
+    clean = CleanRow(
+        mfg_part_num="TNDHD002", part_desc="Timer",
+        e1_brand="-- Unbranded --", unilog_brand="-- No Unilog Brand --",
+        dib_brand="Prime Wire & Cable (3562)", mfr_name="Prime Wire & Cable (3562)",
+    )
+    ext = Extraction(item_type="Timer", brand=None)
+    row = build_output_row(clean, None, None, ext)
+    assert row["BRAND_NAME"] == "Prime Wire & Cable"  # fallback brand: no ®
+    assert "(3562)" not in row["BRAND_NAME"]
+
+
+def test_generic_brand_cleared_so_hint_flows():
+    from pipeline.taxonomy import is_generic_brand
+    assert is_generic_brand("Generic")
+    assert is_generic_brand("Unbranded")
+    assert not is_generic_brand("Prime")
