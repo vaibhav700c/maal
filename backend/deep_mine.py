@@ -27,17 +27,26 @@ CHUNK_OVERLAP = 300
 
 
 def extract_pdf_text(url: str, timeout: int = 30) -> Optional[str]:
-    """Download a PDF and extract text. PyMuPDF primary, pypdf fallback."""
+    """Download a PDF and extract text. PyMuPDF primary, pypdf fallback.
+    Streams with a hard size cap - unbounded resp.content has OOM-killed
+    the 512MB free instance when manufacturers serve huge spec sheets."""
+    max_bytes = 15 * 1024 * 1024
+    pdf_bytes = b""
     try:
         with httpx.Client(
             headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"},
             timeout=timeout,
             follow_redirects=True,
         ) as client:
-            resp = client.get(url)
-            if resp.status_code != 200 or len(resp.content) < 1000:
-                return None
-            pdf_bytes = resp.content
+            with client.stream("GET", url) as resp:
+                if resp.status_code != 200:
+                    return None
+                for chunk in resp.iter_bytes(64 * 1024):
+                    pdf_bytes += chunk
+                    if len(pdf_bytes) > max_bytes:
+                        break  # truncate oversize PDFs instead of dying
+        if len(pdf_bytes) < 1000:
+            return None
     except Exception:
         return None
 
@@ -52,7 +61,7 @@ def extract_pdf_text(url: str, timeout: int = 30) -> Optional[str]:
         doc.close()
         result = "\n".join(pages).strip()
         if len(result) > 300:
-            return result
+            return result[:400_000]  # cap extracted text for the LLM stage
     except Exception:
         pass
 

@@ -523,6 +523,7 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
             )
             dkey = f"domain::{_norm_key(extraction.brand or extraction.manufacturer)}"
             dom = _static_brand_domain(name_hint) or RETRIEVAL_CACHE.get(dkey) or ""
+            print(f"[mfr-resolver] hint={name_hint!r} static_dom={_static_brand_domain(name_hint)!r} cached={RETRIEVAL_CACHE.get(dkey)!r}", file=sys.stderr)
             if not dom:
                 # never cache failures - a later attempt may resolve
                 text = await llm().generate(
@@ -544,8 +545,9 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
                         f for f in result.retrieval.flags
                         if f != "SUPPLIER_DOMAIN_EVIDENCE"
                     ]
-        except Exception:
-            pass  # opportunistic
+            print(f"[mfr-resolver] resolved={dom!r} mfr_url_set={result.output_row.get('MFR URL')!r}", file=sys.stderr)
+        except Exception as _e:
+            print(f"[mfr-resolver] ERROR {type(_e).__name__}: {_e}", file=sys.stderr)
 
     if extraction and getattr(extraction, "knowledge_ref_urls", None):
         for i, u in enumerate(extraction.knowledge_ref_urls[:5], 1):

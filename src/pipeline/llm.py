@@ -76,6 +76,12 @@ class GeminiBackend:
         self._client = genai.Client(api_key=api_key)
         self.model = model
 
+    def _contents(self, prompt: str) -> list:
+        # typed Content objects avoid the SDK's automatic-function-calling
+        # deprecation path (and its per-call stderr noise on Render)
+        t = self._types
+        return [t.Content(role="user", parts=[t.Part(text=prompt)])]
+
     async def complete(self, prompt: str, system: str | None = None) -> str:
         config = (
             self._types.GenerateContentConfig(system_instruction=system)
@@ -83,7 +89,7 @@ class GeminiBackend:
             else None
         )
         resp = await self._client.aio.models.generate_content(
-            model=self.model, contents=prompt, config=config
+            model=self.model, contents=self._contents(prompt), config=config
         )
         return resp.text or ""
 
@@ -95,7 +101,7 @@ class GeminiBackend:
         config = self._types.GenerateContentConfig(**config_kwargs)
 
         resp = await self._client.aio.models.generate_content(
-            model=self.model, contents=prompt, config=config
+            model=self.model, contents=self._contents(prompt), config=config
         )
 
         text = resp.text or ""
