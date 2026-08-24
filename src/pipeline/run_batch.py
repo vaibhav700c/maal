@@ -280,6 +280,12 @@ def build_output_row(
         (extraction.brand if extraction else None)
         or _brand_display(row)
     )
+    from pipeline.taxonomy import is_generic_brand
+
+    if is_generic_brand(extraction.brand if extraction else None):
+        brand = _brand_display(row)
+        if extraction:
+            extraction.brand = None
     # model casing wobble ('AZEK' vs 'Azek'); true acronyms (GE, 3M) survive
     if brand and len(brand) > 3 and brand.isupper() and brand.isalpha():
         brand = brand.title()

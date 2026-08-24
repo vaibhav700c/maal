@@ -366,9 +366,11 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
 
     # one canonical corporate parent everywhere: the static Unilog-style map
     # outranks model knowledge ('Milwaukee Tool', not 'Techtronic Industries')
-    from pipeline.taxonomy import corporate_parent as _corp_of
+    from pipeline.taxonomy import corporate_parent as _corp_of, is_generic_brand
 
     if extraction:
+        if is_generic_brand(extraction.brand):
+            extraction.brand = None  # let real hints (DIB/supplier) flow
         scorp = _corp_of(
             (extraction.brand or "").replace("®", "").replace("™", "").strip()
         )

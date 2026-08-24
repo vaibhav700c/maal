@@ -90,6 +90,20 @@ def normalize_classpath(classpath: str | None) -> str:
     return ">".join(parts)
 
 
+# Fallback models answer 'Generic'/'Unbranded' when they don't know a
+# brand; such placeholders must never occupy the brand slot or real
+# hints (DIB_Brand, supplier-as-maker) can't flow through.
+GENERIC_BRAND_TOKENS = {
+    "generic", "unbranded", "oem", "nobrand", "none", "unknown",
+    "replacement", "aftermarket", "universal",
+}
+
+
+def is_generic_brand(brand: str | None) -> bool:
+    n = re.sub(r"[^a-z0-9]+", "", (brand or "").lower())
+    return n in {re.sub(r"[^a-z0-9]+", "", t) for t in GENERIC_BRAND_TOKENS}
+
+
 def dept_class_fine(text: str) -> tuple[str | None, str | None, str | None]:
     """Map free text (classpath leaf or description) to internal taxonomy."""
     low = text.lower()
