@@ -123,6 +123,12 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
         knowledge_data = await _knowledge_enrich(llm(), p.mpn, row)
         if knowledge_data:
             _merge_knowledge(extraction, knowledge_data)
+            source_urls = knowledge_data.get("source_urls") or []
+            if source_urls:
+                for i, u in enumerate(source_urls[:5], 1):
+                    result.output_row.setdefault(f"Ref URL {i}", u)
+                if not result.output_row.get("MFR URL") or len(result.output_row.get("MFR URL","")) < 12:
+                    result.output_row["MFR URL"] = source_urls[0]
             # also update brand/manufacturer with corporate names when confident
             corp = knowledge_data.get("manufacturer_corporate")
             if corp and extraction.manufacturer in (None, "", row.mfr_name):
@@ -358,19 +364,32 @@ ONLY include facts you genuinely know. Omit attributes you're unsure about."""
         "estimates based on similar models from the same brand and series."
     )
 
-    text = await llm.generate(prompt, system)
+    # Use Google Search grounding for real URLs and verified data
+    source_urls: list[str] = []
+    backend_obj = getattr(llm, "backend", None)
+    if backend_obj and hasattr(backend_obj, "complete_grounded"):
+        try:
+            text, source_urls = await backend_obj.complete_grounded(prompt, system)
+        except Exception:
+            text = await llm.generate(prompt, system)
+    else:
+        text = await llm.generate(prompt, system)
+
     import json as _json
 
     fence = _re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
     raw = fence.group(1) if fence else text
     try:
-        return _json.loads(raw)
+        result = _json.loads(raw)
     except _json.JSONDecodeError:
         cleaned = _re.sub(r",\s*([}\]])", r"\1", raw)
         try:
-            return _json.loads(cleaned)
+            result = _json.loads(cleaned)
         except _json.JSONDecodeError:
             return None
+
+    result["source_urls"] = source_urls[:10]
+    return result
 
 
 def _merge_knowledge(extraction, data: dict) -> None:

@@ -87,6 +87,31 @@ class GeminiBackend:
         )
         return resp.text or ""
 
+    async def complete_grounded(self, prompt: str, system: str | None = None) -> tuple[str, list[str]]:
+        """Gemini with Google Search grounding. Returns (text, source_urls)."""
+        config_kwargs = {"tools": [{"google_search": {}}]}
+        if system:
+            config_kwargs["system_instruction"] = system
+        config = self._types.GenerateContentConfig(**config_kwargs)
+
+        resp = await self._client.aio.models.generate_content(
+            model=self.model, contents=prompt, config=config
+        )
+
+        text = resp.text or ""
+        urls = []
+        # Extract grounding metadata (source URLs Gemini used)
+        if hasattr(resp, "candidates") and resp.candidates:
+            cand = resp.candidates[0]
+            if hasattr(cand, "grounding_metadata") and cand.grounding_metadata:
+                gm = cand.grounding_metadata
+                if hasattr(gm, "grounding_chunks") and gm.grounding_chunks:
+                    for chunk in gm.grounding_chunks:
+                        if hasattr(chunk, "web") and chunk.web and hasattr(chunk.web, "uri"):
+                            if chunk.web.uri not in urls:
+                                urls.append(chunk.web.uri)
+        return text, urls
+
 
 class StubBackend:
     """Test double: returns canned responses (str or callable(prompt)->str)."""
