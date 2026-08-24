@@ -167,6 +167,22 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
             for c in result.physics.checks
         ]
 
+    # Inject LLM-knowledge URLs when retrieval didn't find them
+    if extraction and getattr(extraction, "official_domain", None):
+        existing_mfr = result.output_row.get("MFR URL", "")
+        if not existing_mfr or existing_mfr.rstrip("/") in ("https:/", "https://"):
+            domain = extraction.official_domain
+            if domain.startswith("http"):
+                result.output_row["MFR URL"] = domain
+            elif "." in domain:
+                result.output_row["MFR URL"] = f"https://{domain}"
+
+    if extraction and getattr(extraction, "knowledge_ref_urls", None):
+        for i, u in enumerate(extraction.knowledge_ref_urls[:5], 1):
+            key = f"Ref URL {i}"
+            if not result.output_row.get(key):
+                result.output_row[key] = u
+
     # Unilog internal Dept/Class/Fine taxonomy + corporate parent resolution
     from pipeline.taxonomy import apply_unilog_taxonomy, corporate_parent, order_attributes
 
@@ -309,8 +325,10 @@ Output STRICT JSON with these EXACT attribute labels when applicable:
  "series": "product series/line name",
  "classpath": "full-depth distributor taxonomy path (>= 3 levels)",
  "unspsc": "6-digit UNSPSC code",
- "official_domain": "brand's official website domain",
- "item_type": "short product type noun",
+  "official_domain": "brand's official website domain",
+  "product_url": "exact URL on the manufacturer's site for this specific product, or null",
+  "reference_urls": ["URL to owners manual or spec PDF on manufacturer site", ...] or null,
+  "item_type": "short product type noun",
  "attributes": [
    {{"label": "Series", "value": "...", "uom": null}},
    {{"label": "Voltage Rating", "value": "120", "uom": "V"}},
@@ -397,6 +415,14 @@ def _merge_knowledge(extraction, data: dict) -> None:
         cs = str(cert).strip()
         if cs and cs.lower() not in {x.lower() for x in extraction.certifications}:
             extraction.certifications.append(cs)
+
+    # product URL and reference docs from LLM knowledge
+    product_url = data.get("product_url")
+    if product_url and str(product_url).startswith("http"):
+        extraction.official_domain = str(product_url)
+    ref_urls = data.get("reference_urls")
+    if ref_urls and isinstance(ref_urls, list):
+        extraction.knowledge_ref_urls = [str(u) for u in ref_urls if str(u).startswith("http")]
 
     # additional info
     additional = data.get("additional_information")
