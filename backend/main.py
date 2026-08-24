@@ -688,6 +688,56 @@ async def enrich_single(p: Product) -> dict:
         raise HTTPException(status_code=500, detail=f"enrichment failed: {exc}")
 
 
+# ---------------------------------------------------------------------------
+# Async job pattern: heavy rows (grounded fallback + PDF mining) can exceed
+# serverless execution windows. Start work in the background, poll for it.
+# ---------------------------------------------------------------------------
+import time as _time
+import uuid as _uuid
+
+_JOBS: dict[str, dict] = {}
+
+
+def _gc_jobs() -> None:
+    now = _time.time()
+    for jid in [j for j, v in _JOBS.items() if now - v.get("started", now) > 900]:
+        _JOBS.pop(jid, None)
+
+
+@app.post("/enrich/async")
+async def enrich_async(p: Product) -> dict:
+    _gc_jobs()
+    job_id = _uuid.uuid4().hex[:12]
+    _JOBS[job_id] = {"status": "running", "started": _time.time()}
+
+    async def _run() -> None:
+        try:
+            record, echo = await enrich_product(p)
+            _JOBS[job_id].update(status="done", record=record, echo=echo)
+        except Exception as exc:  # noqa: BLE001 - surfaced via status
+            _JOBS[job_id].update(status="error", error=f"{type(exc).__name__}: {exc}")
+
+    asyncio.create_task(_run())
+    return {"ok": True, "job_id": job_id}
+
+
+@app.get("/enrich/status/{job_id}")
+async def enrich_status(job_id: str) -> dict:
+    job = _JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="unknown or expired job")
+    if job["status"] == "done":
+        record, echo = job["record"], job["echo"]
+        _JOBS.pop(job_id, None)  # one-shot read
+        return {"ok": True, "status": "done", "rows": [record], "echoes": [echo]}
+    if job["status"] == "error":
+        detail = job.get("error", "")
+        _JOBS.pop(job_id, None)
+        return {"ok": False, "status": "error", "detail": detail}
+    return {"ok": True, "status": "running",
+            "elapsed": round(_time.time() - job["started"], 1)}
+
+
 @app.post("/enrich/batch")
 async def enrich_batch_file(file: bytes = File(...)) -> dict:
     """CSV upload (<=10 rows) — same columns as the sample dataset."""

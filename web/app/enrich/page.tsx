@@ -60,19 +60,60 @@ export default function EnrichPage() {
     }
   }
 
+  // Start a backend job and poll to completion — no single serverless call
+  // has to outlive the work, so slow rows (grounded fallback, PDF mining)
+  // can never be killed by a function timeout.
+  async function enrichViaJob(
+    r: { mpn: string; description: string; supplier?: string; brand?: string; e1_brand?: string; unilog_brand?: string },
+    onRetry: (n: number) => void
+  ): Promise<any | null> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        onRetry(attempt + 1);
+        await new Promise(res => setTimeout(res, 8000 * attempt));
+      }
+      try {
+        const startRes = await fetch("/api/enrich-start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(r),
+        });
+        const started = await startRes.json().catch(() => null);
+        const jobId = started?.job_id;
+        if (!jobId) continue;
+        const deadline = Date.now() + 240_000;
+        while (Date.now() < deadline) {
+          await new Promise(res => setTimeout(res, 3000));
+          const sRes = await fetch(`/api/enrich-status/${jobId}`);
+          const sBody = await sRes.json().catch(() => null);
+          if (!sBody || sBody.status === "unreachable") break; // outer retry
+          if (sBody.status === "done") return sBody;
+          if (sBody.status === "error") throw new Error(sBody.detail || "enrichment error");
+        }
+      } catch (err) {
+        if (err instanceof Error && err.message !== "Failed to fetch") throw err;
+      }
+    }
+    return null;
+  }
+
   async function submitSingle() {
+    setBusy(true); setError(null);
     setProgress("Enriching…");
-    const res = post(
-      fetch("/api/enrich", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mpn, description, brand, supplier }),
-      })
-    );
-    const body = await res;
+    let body: any = null;
+    try {
+      body = await enrichViaJob(
+        { mpn, description, supplier: supplier || undefined, brand: brand || undefined },
+        n => setProgress(`Service waking up — retrying (attempt ${n}/3)…`)
+      );
+    } catch (e) {
+      setError(`Enrichment failed: ${e instanceof Error ? e.message : "unknown error"}`);
+    }
     if (body?.rows) {
       setRows(body.rows as JobResultRow[]);
       setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }), 50);
+    } else if (!error) {
+      setError("Enrichment did not complete — the service may be busy. Try again.");
     }
     setBusy(false); setProgress(null);
   }
@@ -126,30 +167,18 @@ export default function EnrichPage() {
 
     if (!allRows.length) { setError("No usable rows found."); setBusy(false); return; }
 
-    // Process ONE product per API call — avoids serverless timeout
+    // Process ONE product per job (start + poll) — immune to function timeouts
     const accumulated: JobResultRow[] = [];
-    const accumulatedEchoes: InputEcho[] = [];
     for (let i = 0; i < allRows.length; i++) {
       const r = allRows[i];
       setProgress(`Enriching ${i + 1} of ${allRows.length}: ${r.mpn}…`);
-      // Retry with backoff — Render's free instance can recycle between
-      // rows; an instant 502 must not silently drop the row.
       let body: any = null;
-      for (let attempt = 0; attempt < 3 && !body?.rows?.[0]; attempt++) {
-        if (attempt > 0) {
-          setProgress(`Service waking up — retrying ${r.mpn} (attempt ${attempt + 1}/3)…`);
-          await new Promise(res => setTimeout(res, 8000 * attempt));
-        }
-        try {
-          const res = await fetch("/api/enrich", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(r),
-          });
-          body = await res.json().catch(() => null);
-        } catch {
-          body = null;
-        }
+      try {
+        body = await enrichViaJob(r, n =>
+          setProgress(`Service waking up — retrying ${r.mpn} (attempt ${n}/3)…`)
+        );
+      } catch {
+        body = null; // row-level failure must not kill the batch
       }
       if (body?.rows?.[0]) {
         accumulated.push(body.rows[0] as JobResultRow);
