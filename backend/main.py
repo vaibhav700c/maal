@@ -935,6 +935,11 @@ import uuid as _uuid
 
 _JOBS: dict[str, dict] = {}
 _JOBS_DIR = ROOT / "output" / "jobs"
+# Retry storms used to pile detached tasks onto the shared Gemini rate
+# limiter until they starved; bound both dimensions.
+_JOB_SEM = asyncio.Semaphore(2)
+_RUNNING_BY_MPN: dict[str, str] = {}
+_JOB_TIMEOUT_S = 420
 
 
 def _gc_jobs() -> None:
@@ -958,8 +963,14 @@ def _persist_job(job_id: str, payload: dict) -> None:
 @app.post("/enrich/async")
 async def enrich_async(p: Product) -> dict:
     _gc_jobs()
+    mpn_key = _norm_key(p.mpn)
+    existing = _RUNNING_BY_MPN.get(mpn_key)
+    if existing and existing in _JOBS and _JOBS[existing].get("status") == "running":
+        return {"ok": True, "job_id": existing, "deduped": True}
+
     job_id = _uuid.uuid4().hex[:12]
     _JOBS[job_id] = {"status": "running", "started": _time.time()}
+    _RUNNING_BY_MPN[mpn_key] = job_id
     _persist_job(job_id, {"status": "running", "started": _JOBS[job_id]["started"]})
 
     async def _heartbeat() -> None:
@@ -970,15 +981,25 @@ async def enrich_async(p: Product) -> dict:
     async def _run() -> None:
         hb = asyncio.create_task(_heartbeat())
         try:
-            record, echo = await enrich_product(p)
+            async with _JOB_SEM:
+                record, echo = await asyncio.wait_for(
+                    enrich_product(p), timeout=_JOB_TIMEOUT_S
+                )
             _JOBS[job_id].update(status="done", record=record, echo=echo)
             _persist_job(job_id, {"status": "done", "finished": _time.time()})
+        except asyncio.TimeoutError:
+            _JOBS[job_id].update(
+                status="error", error=f"exceeded {_JOB_TIMEOUT_S}s budget"
+            )
+            _persist_job(job_id, {"status": "error"})
         except asyncio.CancelledError:
             raise  # process shutdown; job file stays "running" -> stale hb
         except Exception as exc:  # noqa: BLE001 - surfaced via status
             _JOBS[job_id].update(status="error", error=f"{type(exc).__name__}: {exc}")
             _persist_job(job_id, {"status": "error"})
         finally:
+            if _RUNNING_BY_MPN.get(mpn_key) == job_id:
+                _RUNNING_BY_MPN.pop(mpn_key, None)
             hb.cancel()
 
     asyncio.create_task(_run())
