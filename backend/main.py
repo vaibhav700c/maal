@@ -87,22 +87,34 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
         "-- Unbranded --", "-- No Unilog Brand --", "-- No DIB Brand --",
         p.supplier or "-",
     )
-    # extraction classifies inline now; no separate classify call needed
+    # ── Gemini-first: knowledge enrichment BEFORE retrieval ──
     classification = None
+
+    try:
+        knowledge_data = await _knowledge_enrich(llm(), p.mpn, row)
+    except Exception:
+        knowledge_data = None
+
+    if knowledge_data and isinstance(knowledge_data, dict):
+        _merge_knowledge(extraction := type("E", (), {"attributes": [], "features": [], "certifications": [], "item_type": "", "series": None, "brand": None, "manufacturer": None, "classpath": None, "unspsc": None, "official_domain": None, "application": None, "includes": None, "additional": None})(), knowledge_data)
+
+        from pipeline.models import Classification
+        cp = knowledge_data.get("classpath")
+        if cp and isinstance(cp, str):
+            parts = [p.strip() for p in cp.split(">")]
+            classification = Classification(
+                dept=parts[0] if parts else "",
+                klass=parts[1] if len(parts) > 1 else "",
+                fine=parts[-1] if parts else "",
+                classpath=cp.replace(" > ", ">"),
+                unspsc=str(knowledge_data["unspsc"]) if knowledge_data.get("unspsc") else None,
+            )
+        corp = knowledge_data.get("manufacturer_corporate")
+        if corp:
+            extraction.manufacturer = corp
 
     retrieval = await retrieve_for_row(row, cache={})
     extraction = await extract(llm(), row, None, retrieval)
-    if classification is None and getattr(extraction, "classpath", None):
-        from pipeline.models import Classification
-
-        parts = [p.strip() for p in extraction.classpath.split(">")]
-        classification = Classification(
-            dept=parts[0] if parts else "",
-            klass=parts[1] if len(parts) > 1 else "",
-            fine=parts[-1] if parts else "",
-            classpath=extraction.classpath,
-            unspsc=getattr(extraction, "unspsc", None),
-        )
 
     # brand-based second pass when the supplier turned out to be a distributor
     domain_hint = getattr(extraction, "official_domain", None)
