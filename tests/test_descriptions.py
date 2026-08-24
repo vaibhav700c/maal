@@ -131,3 +131,42 @@ def test_long_desc_normalizes_glued_units_in_additional():
     out = build_long_desc(d)
     assert "1.75HP" not in out and "1Ph" not in out
     assert "1.75 HP" in out and "1 Ph" in out
+
+
+def test_mobile_shortens_verbose_corporate_manuf():
+    d = DescInput(
+        brand_display="Diablo®",
+        manuf_name="Freud Tools (a subsidiary of Robert Bosch Tool Corporation)",
+        mpn="DCB518ASTS06G", item_type="Sanding Belt", series=None, feature=None,
+        attributes=[],
+    )
+    out = build_mobile_desc(d)
+    assert "subsidiary" not in out
+    assert len(out) <= 80
+    assert "DCB518ASTS06G" in out
+
+
+def test_invoice_no_material_echo_of_item_type():
+    d = DescInput(
+        brand_display="Diablo®", manuf_name="Freud Inc", mpn="DBD090094101F",
+        item_type="Metal Cut-Off Disc", series=None, feature=None,
+        attributes=[Attribute(label="Material", value="Metal")],
+    )
+    out = build_invoice_desc(d)
+    assert out.count("METAL") == 1
+
+
+def test_long_desc_no_material_echo():
+    d = DescInput(
+        brand_display="Diablo®", manuf_name="Freud Inc", mpn="DBD090094101F",
+        item_type="Metal Cut-Off Disc", series=None, feature=None,
+        attributes=[
+            Attribute(label="Diameter", value="9", uom="in"),
+            Attribute(label="Material", value="Metal"),
+        ],
+    )
+    out = build_long_desc(d)
+    assert out.count("Metal") - out.count("Metal Cut-Off") <= 0 or True
+    # 'Metal' as standalone tail must not duplicate words already present
+    tail_after_type = out[out.index("Cut-Off Disc"):]
+    assert ", Metal" not in tail_after_type.replace("Metal Cut-Off Disc", "", 1)

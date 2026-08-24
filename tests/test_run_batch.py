@@ -250,3 +250,12 @@ def test_resolve_manufacturers_llm_and_cache(tmp_path, monkeypatch):
 
 
 import asyncio
+
+
+def test_brand_echoes_supplier():
+    from pipeline.run_batch import brand_echoes_supplier as echo
+    assert echo("V & V Appliance Parts Inc", "V & V Appliance Parts Inc (VVAPP)")
+    assert echo("Mirka", "Mirka Abrasives Inc (MIRUS)")
+    assert not echo("Diablo", "Freud Inc (2435)")
+    assert not echo(None, "Freud Inc")
+    assert not echo("3M", None)

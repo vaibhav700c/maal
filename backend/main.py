@@ -203,6 +203,14 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
         corp = knowledge_data.get("manufacturer_corporate")
         if corp and extraction.manufacturer in (None, "", row.mfr_name):
             extraction.manufacturer = corp
+        # a brand that merely restates the supplier is not a brand
+        from pipeline.run_batch import brand_echoes_supplier
+
+        kbrand = str(knowledge_data.get("brand") or "").strip()
+        if kbrand and (
+            not extraction.brand or brand_echoes_supplier(extraction.brand, row.mfr_name)
+        ):
+            extraction.brand = kbrand
 
     # deep document mining: product page + PDF manuals -> spec attributes
     from backend.deep_mine import mine_documents
@@ -494,6 +502,12 @@ def _merge_knowledge(extraction, data: dict) -> None:
     """Merge knowledge-inferred attributes into the extraction ledger.
     All values marked tier=0.5 (knowledge-inferred) so provenance is clear."""
     existing_labels = {a.label.lower() for a in extraction.attributes}
+
+    # top-level brand: fill only when the extraction has none at all;
+    # supplier-echo replacement is handled by callers that know the supplier
+    kbrand = str(data.get("brand") or "").strip()
+    if kbrand and not getattr(extraction, "brand", None):
+        extraction.brand = kbrand
 
     for item in data.get("attributes") or []:
         label = str(item.get("label") or "").strip()

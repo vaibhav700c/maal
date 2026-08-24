@@ -38,3 +38,15 @@ def test_merge_dedupes_existing_labels():
     assert len(ext.attributes) == 2
     voltage = next(a for a in ext.attributes if a.label == "Voltage Rating")
     assert voltage.value == "115"  # existing value wins
+
+
+def test_merge_threads_brand_when_missing():
+    ext = Extraction(item_type="Heater Kit")
+    _merge_knowledge(ext, {"attributes": [], "brand": "Speed Queen"})
+    assert ext.brand == "Speed Queen"
+
+
+def test_merge_keeps_existing_brand():
+    ext = Extraction(item_type="Disc", brand="Diablo")
+    _merge_knowledge(ext, {"attributes": [], "brand": "Freud"})
+    assert ext.brand == "Diablo"

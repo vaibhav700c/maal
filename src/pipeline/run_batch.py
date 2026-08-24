@@ -65,6 +65,13 @@ def _norm_key(s: str | None) -> str:
     return _re.sub(r"[^a-z0-9]+", "", (s or "").lower())
 
 
+def brand_echoes_supplier(brand: str | None, supplier: str | None) -> bool:
+    """True when the 'brand' is really the supplier string restated
+    ('V & V Appliance Parts Inc' for supplier 'V & V Appliance Parts Inc')."""
+    b, s = _norm_key(brand), _norm_key(supplier)
+    return bool(b and s) and (b in s or s in b)
+
+
 def _load_mfr_cache() -> dict:
     if MFR_CACHE_PATH.exists():
         try:
@@ -583,14 +590,19 @@ async def run_batch(
                     continue
                 try:
                     kdata = await _knowledge_enrich(llm, row.mfg_part_num, row)
-                    if kdata:
-                        _merge_knowledge(ext, kdata)
-                        # corporate parent resolution
-                        corp = kdata.get("manufacturer_corporate")
-                        if corp and row.output_row if False else True:
-                            pass  # handled in build_output_row via extraction.manufacturer
-                        if corp and not ext.manufacturer:
-                            ext.manufacturer = corp
+                    if not kdata:
+                        continue
+                    _merge_knowledge(ext, kdata)
+                    # a brand that merely restates the supplier is not a brand
+                    kb = str(kdata.get("brand") or "").strip()
+                    if kb and (
+                        not ext.brand or brand_echoes_supplier(ext.brand, row.mfr_name)
+                    ):
+                        ext.brand = kb
+                    # corporate parent resolution
+                    corp = kdata.get("manufacturer_corporate")
+                    if corp and not ext.manufacturer:
+                        ext.manufacturer = corp
                 except Exception:
                     pass  # opportunistic
 

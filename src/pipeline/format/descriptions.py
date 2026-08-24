@@ -33,6 +33,21 @@ class DescInput:
 def _norm(s):
     return (s or "").replace("®", "").replace("™", "").strip().lower()
 
+def shorten_manuf(name: str | None) -> str | None:
+    """Display form: drop parentheticals ('Freud Tools (a subsidiary of
+    Robert Bosch Tool Corporation)' -> 'Freud Tools') and trailing commas."""
+    if not name:
+        return name
+    return re.sub(r"\s*\([^)]*\)", "", name).strip().rstrip(",") or None
+
+def _words_duplicated(text: str, candidate: str | None) -> bool:
+    """True when every word of candidate already appears in text."""
+    if not candidate:
+        return False
+    cw = set(re.findall(r"[a-z]+", _norm(candidate)))
+    tw = set(re.findall(r"[a-z]+", _norm(text)))
+    return bool(cw) and cw <= tw
+
 def _brand(d):
     return d.brand_display or d.manuf_name or None
 
@@ -104,10 +119,13 @@ def build_mobile_desc(d: DescInput) -> str:
     """GT: Whirlpool, Dishwasher, Eco Series, WDTS7024RZ, Built-in Mounting"""
     d.item_type = d.item_type.title() if d.item_type else d.item_type
     head_parts: list[str] = []
-    for part in [d.manuf_name, _brand(d)]:
+    for part in [shorten_manuf(d.manuf_name), _brand(d)]:
         np = _norm(part)
         if part and np and np not in [_norm(p) for p in head_parts]:
             head_parts.append(part)
+    # a brand contained inside the manufacturer string adds nothing
+    if len(head_parts) == 2 and _norm(head_parts[0]) in _norm(head_parts[1]):
+        head_parts = [head_parts[1]]
     head = " ".join(head_parts)
 
     pieces = [p for p in [head, d.item_type.title(), d.series, d.mpn] if p]
@@ -140,6 +158,7 @@ def build_invoice_desc(d: DescInput) -> str:
     """GT: DISHWASHER BLTLN SST SST 120V 10A 41DBA (≤40 CAPS).
     Packs: TYPE COLOR-ABBR MATERIAL-ABBR VOLTS AMPS SOUND."""
     parts = [d.item_type.upper()]
+    assembled = " ".join(parts)
     color = _abbr_catalog(_get(d, "Color", "Colour", "Finish"))
     material = _abbr_catalog(_get(d, "Material"))
     volts = _obj(d, "Voltage Rating")
@@ -147,8 +166,17 @@ def build_invoice_desc(d: DescInput) -> str:
     # sound/material/color already handled via _get below
     sound = _obj(d, "Sound Level")
 
-    if color: parts.append(color)
-    if material: parts.append(material)
+    if material and _words_duplicated(assembled, material):
+        material = None  # 'Metal Cut-Off Disc' already says METAL
+    if color:
+        if _words_duplicated(assembled, color):
+            color = None
+        else:
+            parts.append(color)
+            assembled = " ".join(parts)
+    if material:
+        parts.append(material)
+        assembled = " ".join(parts)
     # GT sometimes repeats material abbreviation
     if material and color and color[0] == material[0]: parts.append(material)
     if volts and volts.value: parts.append(_with_suffix(volts.value, "V"))
@@ -205,8 +233,10 @@ def build_long_desc(d: DescInput) -> str:
     if max_h: parts.append(max_h if "maximum height" in max_h.lower() else f"{max_h} Maximum Height")
     if sound:
         parts.append(sound if "sound level" in sound.lower() else f"{sound} Sound Level")
-    if material: parts.append(material)
-    if color and color != material: parts.append(material)  # GT repeats material
+    if material and not _words_duplicated(", ".join(parts), material):
+        parts.append(material)
+    if color and color != material and not _words_duplicated(", ".join(parts), material):
+        parts.append(material)  # GT repeats material
     if d.additional:
         additional = _GLUED_UNIT_RE.sub(r"\1 \2", d.additional)
         parts.append(f"Additional Information: {additional}")
