@@ -135,6 +135,11 @@ def build_mobile_desc(d: DescInput) -> str:
         pieces = [p for p in pieces if p != d.series]
     mount = _mount(d)
     out = ", ".join(pieces)
+    # the MPN is the one token that must survive; drop the longest leading
+    # pieces (corporate names) before ever truncating content
+    while len(out) > MOBILE_MAX and len(pieces) > 1:
+        pieces.pop(0)
+        out = ", ".join(pieces)
     if len(out) < MOBILE_MIN and d.attributes:
         skip = {_norm(x) for x in [d.manuf_name, _brand(d), d.mpn, d.item_type] if x}
         block = {"brand name", "model number", "product type"}
@@ -147,7 +152,9 @@ def build_mobile_desc(d: DescInput) -> str:
         if extras:
             out += ", " + ", ".join(extras)
     if mount and mount.lower() not in out.lower():
-        out += f", {mount}"
+        candidate = f"{out}, {mount}"
+        if len(candidate) <= MOBILE_MAX:
+            out = candidate
     if len(out) > MOBILE_MAX:
         out = _trunc(out, MOBILE_MAX)
     return out
@@ -177,8 +184,9 @@ def build_invoice_desc(d: DescInput) -> str:
     if material:
         parts.append(material)
         assembled = " ".join(parts)
-    # GT sometimes repeats material abbreviation
-    if material and color and color[0] == material[0]: parts.append(material)
+    # GT occasionally repeats material when color IS the material (SST SST);
+    # a shared first letter alone is not a reason ('SLATE' 'STEEL')
+    if material and color and color == material: parts.append(material)
     if volts and volts.value: parts.append(_with_suffix(volts.value, "V"))
     if amps and amps.value: parts.append(_with_suffix(amps.value, "A"))
     if sound and sound.value: parts.append(_with_suffix(sound.value, "DBA"))

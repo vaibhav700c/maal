@@ -232,6 +232,9 @@ def build_output_row(
         (extraction.brand if extraction else None)
         or _brand_display(row)
     )
+    # model casing wobble ('AZEK' vs 'Azek'); true acronyms (GE, 3M) survive
+    if brand and len(brand) > 3 and brand.isupper() and brand.isalpha():
+        brand = brand.title()
     if brand and extraction and extraction.brand and "\u00ae" not in brand:
         brand = f"{brand}\u00ae"  # house style: resolved brands carry the mark
     from pipeline.taxonomy import corporate_parent as _corp

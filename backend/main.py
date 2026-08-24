@@ -323,6 +323,66 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
         ):
             extraction.brand = kbrand
 
+    # a 'brand' that is really the product descriptor ('Mason' from
+    # Mason Line, 'Select' from Select Railing) is not a brand either
+    if extraction and extraction.brand:
+        it_words = {
+            w for w in re.split(r"[^a-z0-9]+", (extraction.item_type or "").lower())
+            if len(w) >= 4
+        }
+        b_words = {
+            w for w in re.split(r"[^a-z0-9]+", (extraction.brand or "").lower())
+            if len(w) >= 4
+        }
+        if b_words and b_words <= it_words:
+            extraction.brand = None
+
+    # one canonical corporate parent everywhere: the static Unilog-style map
+    # outranks model knowledge ('Milwaukee Tool', not 'Techtronic Industries')
+    from pipeline.taxonomy import corporate_parent as _corp_of
+
+    if extraction:
+        scorp = _corp_of(
+            (extraction.brand or "").replace("®", "").replace("™", "").strip()
+        )
+        if scorp:
+            extraction.manufacturer = scorp
+
+    # wrong-domain evidence: a distributor page (e.g. the supplier's own
+    # site) must not stand in for the maker's page once the brand is known
+    brand_tokens = [
+        t for t in re.split(r"[^a-z0-9]+", (extraction.brand or p.brand or "").lower())
+        if len(t) >= 4
+    ]
+
+    def _host_ok(url: str | None) -> bool:
+        if not url or not brand_tokens:
+            return True
+        host = url.split("/")[2]
+        return any(t in host.lower() for t in brand_tokens)
+
+    if (
+        brand_tokens
+        and extraction.brand
+        and retrieval is not None
+        and not _host_ok(retrieval.product_url or retrieval.mfr_url)
+    ):
+        try:
+            upgraded = await retrieve_by_brand(
+                extraction.brand, row, cache=RETRIEVAL_CACHE, ddgs_fn=None
+            )
+            better_host = _host_ok(upgraded.mfr_url or upgraded.product_url)
+            has_evidence = bool(
+                upgraded.product_url or upgraded.ref_urls or upgraded.snippets
+            )
+            if has_evidence and (better_host or not _host_ok(
+                retrieval.product_url or retrieval.mfr_url
+            )):
+                upgraded.flags.append("BRAND_DOMAIN_LOOKUP")
+                retrieval = upgraded
+        except Exception:
+            pass  # opportunistic
+
     # deep document mining: product page + PDF manuals -> spec attributes
     from backend.deep_mine import mine_documents
 

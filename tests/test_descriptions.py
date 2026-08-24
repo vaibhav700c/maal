@@ -9,7 +9,7 @@ from pipeline.format.descriptions import (
     build_retail_desc,
     build_short_desc,
 )
-from pipeline.models import Attribute
+from pipeline.models import Attribute, CleanRow, Extraction
 
 
 @pytest.fixture
@@ -170,3 +170,43 @@ def test_long_desc_no_material_echo():
     # 'Metal' as standalone tail must not duplicate words already present
     tail_after_type = out[out.index("Cut-Off Disc"):]
     assert ", Metal" not in tail_after_type.replace("Metal Cut-Off Disc", "", 1)
+
+
+def test_invoice_no_steel_steel_when_color_shares_first_letter():
+    d = DescInput(
+        brand_display="GE®", manuf_name="GE Appliances", mpn="GNE25JMKES",
+        item_type="Refrigerator", series=None, feature=None,
+        attributes=[
+            Attribute(label="Color", value="Slate"),
+            Attribute(label="Material", value="Steel"),
+            Attribute(label="Voltage Rating", value="120", uom="V"),
+            Attribute(label="Amperage Rating", value="15", uom="A"),
+        ],
+    )
+    out = build_invoice_desc(d)
+    assert out.count("STEEL") == 1
+    assert "SLATE" in out
+
+
+def test_mobile_drops_head_before_losing_mpn():
+    d = DescInput(
+        brand_display="Milwaukee®",
+        manuf_name="Techtronic Industries Co. Ltd.",
+        mpn="49-94-0117", item_type="Cut Off Disc", series="Performance+", feature=None,
+        attributes=[],
+    )
+    out = build_mobile_desc(d)
+    assert len(out) <= 80
+    assert "49-94-0117" in out
+
+
+def test_brand_casing_normalized_to_title():
+    from pipeline.run_batch import build_output_row
+    clean = CleanRow(
+        mfg_part_num="ADCB15516BS", part_desc="Azek decking",
+        e1_brand="-- Unbranded --", unilog_brand="-- No Unilog Brand --",
+        dib_brand="-- No DIB Brand --", mfr_name="AZEK Building Products",
+    )
+    ext = Extraction(item_type="Decking", brand="AZEK")
+    row = build_output_row(clean, None, None, ext)
+    assert row["BRAND_NAME"] == "Azek®"
