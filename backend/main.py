@@ -489,6 +489,12 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
                 result.output_row["MFR URL"] = f"https://{dom}"
                 if result.retrieval is not None:
                     result.retrieval.flags.append("BRAND_DOMAIN_LOOKUP")
+                    # the shipped URL now derives from the maker's domain,
+                    # not the distributor hit - stop suppressing it
+                    result.retrieval.flags = [
+                        f for f in result.retrieval.flags
+                        if f != "SUPPLIER_DOMAIN_EVIDENCE"
+                    ]
         except Exception:
             pass  # opportunistic
 
