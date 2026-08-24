@@ -469,12 +469,26 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
         row, classification, retrieval, extraction, corrections={}
     )
 
-    # knowledge-tier source URLs (collected pre-finalize; `result` exists now)
+    # knowledge-tier source URLs (collected pre-finalize; `result` exists now).
+    # A distributor page from grounding must never become MFR URL - leave the
+    # slot open for the brand-domain resolver instead.
+    _supplier_flagged = bool(
+        result.retrieval and "SUPPLIER_DOMAIN_EVIDENCE" in (result.retrieval.flags or [])
+    )
+
+    def _host_ok_url(u: str) -> bool:
+        host = u.split("/")[2] if "://" in u else ""
+        return "." in host and len(host) > 4
+
     if knowledge_urls:
         for i, u in enumerate(knowledge_urls[:5], 1):
             result.output_row.setdefault(f"Ref URL {i}", u)
-        if len(result.output_row.get("MFR URL", "")) < 12:
-            result.output_row["MFR URL"] = knowledge_urls[0]
+        if (
+            not _supplier_flagged
+            and knowledge_urls[0] != (result.retrieval.mfr_url if result.retrieval else None)
+            and _host_ok_url(knowledge_urls[0])
+        ):
+            result.output_row.setdefault("MFR URL", knowledge_urls[0])
 
     physics = None
     if result.physics:
