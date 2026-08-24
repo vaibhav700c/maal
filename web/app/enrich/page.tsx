@@ -98,14 +98,30 @@ export default function EnrichPage() {
     const iMpn = headers.findIndex(h => ["mfg_part_num","mpn","part number","sku"].includes(h));
     const iDesc = headers.findIndex(h => ["part_desc","description","desc","product description"].includes(h));
     const iSup = headers.findIndex(h => ["part_manuf","manufacturer","supplier","vendor"].includes(h));
+    const iE1 = headers.findIndex(h => h === "e1_brand");
+    const iUnilog = headers.findIndex(h => h === "unilog_brand");
+    const iDib = headers.findIndex(h => h === "dib_brand");
     if (iMpn === -1 || iDesc === -1) { setError("Need part-number and description columns."); setBusy(false); return; }
+    const PLACEHOLDERS = new Set(["-- unbranded --", "-- no unilog brand --", "-- no dib brand --", "-"]);
+    const hint = (cells: string[], idx: number): string | undefined => {
+      if (idx < 0) return undefined;
+      const v = cells[idx]?.trim();
+      return v && !PLACEHOLDERS.has(v.toLowerCase()) ? v : undefined;
+    };
 
     // Build all data rows
-    const allRows: Array<{mpn:string;description:string;supplier?:string}> = [];
+    const allRows: Array<{mpn:string;description:string;supplier?:string;brand?:string;e1_brand?:string;unilog_brand?:string}> = [];
     for (let i = 1; i < lines.length; i++) {
       const cells = parseLine(lines[i]);
       const mpnVal = cells[iMpn]?.trim(); const descVal = cells[iDesc]?.trim();
-      if (mpnVal || descVal) allRows.push({ mpn: mpnVal || descVal.slice(0,24), description: descVal, supplier: iSup >= 0 ? cells[iSup]?.trim() : undefined });
+      if (mpnVal || descVal) allRows.push({
+        mpn: mpnVal || descVal.slice(0,24),
+        description: descVal,
+        supplier: hint(cells, iSup),
+        brand: hint(cells, iDib),
+        e1_brand: hint(cells, iE1),
+        unilog_brand: hint(cells, iUnilog),
+      });
     }
 
     if (!allRows.length) { setError("No usable rows found."); setBusy(false); return; }

@@ -6,7 +6,14 @@ export const dynamic = "force-dynamic";
 
 const BACKEND = process.env.BACKEND_URL;
 
-type Row = { mpn: string; description: string; supplier?: string };
+type Row = {
+  mpn: string;
+  description: string;
+  supplier?: string;
+  brand?: string;
+  e1_brand?: string;
+  unilog_brand?: string;
+};
 
 export async function POST(request: Request) {
   if (!BACKEND) {
@@ -15,7 +22,7 @@ export async function POST(request: Request) {
       { status: 503 }
     );
   }
-  let body: { rows?: Array<{ mpn: string; description: string; supplier?: string }> };
+  let body: { rows?: Row[] };
   try {
     body = await request.json();
   } catch {

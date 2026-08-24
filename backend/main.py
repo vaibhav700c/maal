@@ -49,6 +49,10 @@ app.add_middleware(
 _settings = Settings.from_env()
 _llm: Optional[LLMClient] = None
 
+from pipeline.retrieve import load_cache as _load_retrieval_cache  # noqa: E402
+
+RETRIEVAL_CACHE: dict = _load_retrieval_cache()
+
 
 def llm() -> LLMClient:
     global _llm
@@ -64,6 +68,60 @@ class Product(BaseModel):
     description: str
     brand: Optional[str] = None
     supplier: Optional[str] = None
+    e1_brand: Optional[str] = None
+    unilog_brand: Optional[str] = None
+
+
+_PLACEHOLDERS = {"-- unbranded --", "-- no unilog brand --", "-- no dib brand --", "-"}
+
+
+def _clean_hint(value: str | None) -> Optional[str]:
+    v = (value or "").strip()
+    return None if not v or v.lower() in _PLACEHOLDERS else v
+
+
+def parse_upload(text: str, cap: int = 3) -> list[Product]:
+    """Parse an uploaded CSV/TSV into Products, keeping brand hints."""
+    import csv as _csv
+    import io
+
+    reader = _csv.DictReader(io.StringIO(text))
+    headers = [(h or "").strip().lower() for h in (reader.fieldnames or [])]
+
+    def col(*names: str) -> Optional[int]:
+        for n in names:
+            if n in headers:
+                return headers.index(n)
+        return next((headers.index(h) for h in headers if any(x in h for x in names)), None)
+
+    i_mpn = col("mfg_part_num", "mpn", "part number", "sku")
+    i_desc = col("part_desc", "description", "desc")
+    i_sup = col("part_manuf", "manufacturer", "supplier", "vendor")
+    i_e1 = col("e1_brand")
+    i_unilog = col("unilog_brand")
+    i_dib = col("dib_brand")
+    if i_mpn is None or i_desc is None:
+        raise HTTPException(status_code=422, detail="Need part-number and description columns")
+
+    products: list[Product] = []
+    for r in reader:
+        vals = list(r.values())
+        def cell(idx: Optional[int]) -> str:
+            return vals[idx].strip() if idx is not None and idx < len(vals) else ""
+        mpn = cell(i_mpn)
+        desc = cell(i_desc)
+        if mpn or desc:
+            products.append(Product(
+                mpn=mpn or desc[:24],
+                description=desc,
+                supplier=_clean_hint(cell(i_sup)),
+                brand=_clean_hint(cell(i_dib)),
+                e1_brand=_clean_hint(cell(i_e1)),
+                unilog_brand=_clean_hint(cell(i_unilog)),
+            ))
+        if len(products) >= cap:
+            break
+    return products
 
 
 class BatchRequest(BaseModel):
@@ -85,7 +143,9 @@ async def health() -> dict:
 async def enrich_product(p: Product) -> tuple[dict, dict]:
     row = cleanse_row(
         p.mpn, p.description,
-        "-- Unbranded --", "-- No Unilog Brand --", "-- No DIB Brand --",
+        p.e1_brand or "-- Unbranded --",
+        p.unilog_brand or "-- No Unilog Brand --",
+        p.brand or "-- No DIB Brand --",
         p.supplier or "-",
     )
     # ── Gemini-first: knowledge enrichment BEFORE retrieval ──
@@ -114,7 +174,7 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
         if corp:
             extraction.manufacturer = corp
 
-    retrieval = await retrieve_for_row(row, cache={})
+    retrieval = await retrieve_for_row(row, cache=RETRIEVAL_CACHE)
     extraction = await extract(llm(), row, None, retrieval)
 
     # brand-based second pass when the supplier turned out to be a distributor
@@ -123,31 +183,26 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
         retrieval.product_url or retrieval.ref_urls or retrieval.snippets
     ):
         upgraded = await retrieve_by_brand(
-            domain_hint or extraction.brand, row, cache={}, ddgs_fn=None
+            domain_hint or extraction.brand, row, cache=RETRIEVAL_CACHE, ddgs_fn=None
         )
         if upgraded.product_url or upgraded.ref_urls or upgraded.snippets:
             upgraded.flags.append("BRAND_DOMAIN_LOOKUP")
             retrieval = upgraded
-
-    # knowledge-tier enrichment: for well-known brands/models, the LLM can
-    # supply specs from training data. Marked tier 0.5 KNOWLEDGE so they are
-    # clearly distinguished from source-verified facts.
     try:
-        knowledge_data = await _knowledge_enrich(llm(), p.mpn, row)
-        if knowledge_data:
-            _merge_knowledge(extraction, knowledge_data)
-            source_urls = knowledge_data.get("source_urls") or []
-            if source_urls:
-                for i, u in enumerate(source_urls[:5], 1):
-                    result.output_row.setdefault(f"Ref URL {i}", u)
-                if not result.output_row.get("MFR URL") or len(result.output_row.get("MFR URL","")) < 12:
-                    result.output_row["MFR URL"] = source_urls[0]
-            # also update brand/manufacturer with corporate names when confident
-            corp = knowledge_data.get("manufacturer_corporate")
-            if corp and extraction.manufacturer in (None, "", row.mfr_name):
-                extraction.manufacturer = corp
+        from pipeline.retrieve import save_cache
+        save_cache(RETRIEVAL_CACHE)
     except Exception:
-        pass  # knowledge enrichment is opportunistic
+        pass
+
+    # knowledge-tier enrichment merged from the SAME Gemini-first pass —
+    # a second grounded call here doubled latency for zero new information
+    knowledge_urls: list[str] = []
+    if knowledge_data:
+        _merge_knowledge(extraction, knowledge_data)
+        knowledge_urls = [u for u in (knowledge_data.get("source_urls") or []) if u]
+        corp = knowledge_data.get("manufacturer_corporate")
+        if corp and extraction.manufacturer in (None, "", row.mfr_name):
+            extraction.manufacturer = corp
 
     # deep document mining: product page + PDF manuals -> spec attributes
     from backend.deep_mine import mine_documents
@@ -201,6 +256,13 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
     result = finalize_row(
         row, classification, retrieval, extraction, corrections={}
     )
+
+    # knowledge-tier source URLs (collected pre-finalize; `result` exists now)
+    if knowledge_urls:
+        for i, u in enumerate(knowledge_urls[:5], 1):
+            result.output_row.setdefault(f"Ref URL {i}", u)
+        if len(result.output_row.get("MFR URL", "")) < 12:
+            result.output_row["MFR URL"] = knowledge_urls[0]
 
     physics = None
     if result.physics:
@@ -504,25 +566,8 @@ async def enrich_single(p: Product) -> dict:
 @app.post("/enrich/batch")
 async def enrich_batch_file(file: bytes = File(...)) -> dict:
     """CSV upload (<=10 rows) — same columns as the sample dataset."""
-    import csv as _csv
-    import io
-
     text = file.decode("utf-8-sig", errors="replace")
-    rows_in: list[Product] = []
-    reader = _csv.DictReader(io.StringIO(text))
-    headers = [h.strip().lower() for h in (reader.fieldnames or [])]
-    i_mpn = next((headers.index(h) for h in headers if h in ("mfg_part_num", "mpn", "part number", "sku")), None)
-    i_desc = next((headers.index(h) for h in headers if h in ("part_desc", "description", "desc", "product description", "item description", "title") or "description" in h), None)
-    if i_mpn is None or i_desc is None:
-        raise HTTPException(status_code=422, detail="Need part-number and description columns")
-    for r in reader:
-        vals = list(r.values())
-        mpn = vals[i_mpn].strip() if i_mpn < len(vals) else ""
-        desc = vals[i_desc].strip() if i_desc < len(vals) else ""
-        if mpn or desc:
-            rows_in.append(Product(mpn=mpn or desc[:24], description=desc))
-        if len(rows_in) >= 3:
-            break
+    rows_in = parse_upload(text, cap=3)
     if not rows_in:
         raise HTTPException(status_code=422, detail="No usable rows found")
 
