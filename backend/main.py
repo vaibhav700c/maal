@@ -23,6 +23,7 @@ from pipeline.config import Settings  # noqa: E402
 from pipeline.extract import extract  # noqa: E402
 from pipeline.llm import LLMClient  # noqa: E402
 from pipeline.models import (  # noqa: E402
+    Attribute,
     CleanRow,
     RetrievalResult,
 )
@@ -416,7 +417,7 @@ def _merge_knowledge(extraction, data: dict) -> None:
             continue
         confident = bool(item.get("confident", False))
         extraction.attributes.append(
-            type(extraction.attributes[0])(
+            Attribute(
                 label=label.title(),
                 value=value,
                 uom=item.get("uom"),
