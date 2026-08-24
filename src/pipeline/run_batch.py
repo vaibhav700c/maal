@@ -44,6 +44,17 @@ from pipeline.retrieve import (
 )
 from pipeline.verify_adversarial import verify_many
 
+# Import knowledge enrichment from backend (shared codebase)
+import sys as _sys
+_backend_dir = str(Path(__file__).resolve().parents[1] / "backend")
+if _backend_dir not in _sys.path:
+    _sys.path.insert(0, _backend_dir)
+try:
+    from backend.main import _knowledge_enrich
+    HAS_KNOWLEDGE = True
+except ImportError:
+    HAS_KNOWLEDGE = False
+
 STATE_PATH_DEFAULT = Path("output/state.jsonl")
 CORRECTIONS_PATH = Path("output/corrections.jsonl")
 
@@ -121,8 +132,10 @@ def build_output_row(
     )
     if brand and extraction and extraction.brand and "\u00ae" not in brand:
         brand = f"{brand}\u00ae"  # house style: resolved brands carry the mark
+    from pipeline.taxonomy import corporate_parent as _corp
     manufacturer = (
         (extraction.manufacturer if extraction else None)
+        or _corp(_brand_display(row))
         or row.mfr_name
         or ""
     )
@@ -466,6 +479,25 @@ async def run_batch(
             u if isinstance(u, RetrievalResult) else old
             for u, old in zip(upgrades, retrievals)
         ]
+
+        # 2b) knowledge enrichment — fill in model-known specs for each row
+        if HAS_KNOWLEDGE:
+            from backend.main import _merge_knowledge
+            for row, ext in zip(rows_chunk, extractions):
+                if ext is None or not ext.attributes:
+                    continue
+                try:
+                    kdata = await _knowledge_enrich(llm, row.mfg_part_num, row)
+                    if kdata:
+                        _merge_knowledge(ext, kdata)
+                        # corporate parent resolution
+                        corp = kdata.get("manufacturer_corporate")
+                        if corp and row.output_row if False else True:
+                            pass  # handled in build_output_row via extraction.manufacturer
+                        if corp and not ext.manufacturer:
+                            ext.manufacturer = corp
+                except Exception:
+                    pass  # opportunistic
 
         # 3) batched adversarial audit — only rows with evidence consume calls
         try:
