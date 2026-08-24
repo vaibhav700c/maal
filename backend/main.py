@@ -371,15 +371,23 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
             upgraded = await retrieve_by_brand(
                 extraction.brand, row, cache=RETRIEVAL_CACHE, ddgs_fn=None
             )
-            better_host = _host_ok(upgraded.mfr_url or upgraded.product_url)
-            has_evidence = bool(
+            if _host_ok(upgraded.mfr_url or upgraded.product_url) and (
                 upgraded.product_url or upgraded.ref_urls or upgraded.snippets
-            )
-            if has_evidence and (better_host or not _host_ok(
-                retrieval.product_url or retrieval.mfr_url
-            )):
+            ):
                 upgraded.flags.append("BRAND_DOMAIN_LOOKUP")
                 retrieval = upgraded
+            else:
+                # distributor results dominate search for brand terms; the
+                # grounded fallback is hard-restricted to brand domains
+                fallback = await _grounded_retrieval_fallback(
+                    llm(), p.mpn, row, extraction.brand
+                )
+                if fallback is not None:
+                    retrieval = fallback
+                elif retrieval.flags:
+                    retrieval.flags.extend(
+                        ["SUPPLIER_DOMAIN_EVIDENCE", "NEEDS_REVIEW"]
+                    )
         except Exception:
             pass  # opportunistic
 
