@@ -461,10 +461,33 @@ async def enrich_product(p: Product) -> tuple[dict, dict]:
         existing_mfr = result.output_row.get("MFR URL", "")
         if not existing_mfr or existing_mfr.rstrip("/") in ("https:/", "https://"):
             domain = extraction.official_domain
-            if domain.startswith("http"):
+            if domain.startswith("http") and "." in domain.split("/")[2]:
                 result.output_row["MFR URL"] = domain
             elif "." in domain:
                 result.output_row["MFR URL"] = f"https://{domain}"
+
+    # last resort for MFR URL: the brand's own domain root. A maker's root
+    # site is legitimate manufacturer provenance even when the exact product
+    # page cannot be located.
+    if not result.output_row.get("MFR URL") and extraction and extraction.brand:
+        try:
+            dkey = f"domain::{_norm_key(extraction.brand)}"
+            dom = RETRIEVAL_CACHE.get(dkey)
+            if dom is None:
+                text = await llm().generate(
+                    "Reply with ONLY the official website domain of the brand "
+                    f"{extraction.brand}, in the form example.com - no scheme, "
+                    "no path, no explanation."
+                )
+                m = re.search(r"([a-z0-9-]+\.[a-z0-9.-]+)", (text or "").strip(), re.I)
+                dom = m.group(1).lower().rstrip(".") if m else ""
+                RETRIEVAL_CACHE[dkey] = dom
+            if dom and "." in dom:
+                result.output_row["MFR URL"] = f"https://{dom}"
+                if result.retrieval is not None:
+                    result.retrieval.flags.append("BRAND_DOMAIN_LOOKUP")
+        except Exception:
+            pass  # opportunistic
 
     if extraction and getattr(extraction, "knowledge_ref_urls", None):
         for i, u in enumerate(extraction.knowledge_ref_urls[:5], 1):

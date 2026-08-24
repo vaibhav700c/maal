@@ -122,3 +122,23 @@ def test_with_and_approvals_stay_blank_without_data():
     row = build_output_row(_clean(), None, None, _ext([]))
     assert "With" not in row
     assert "Standard/Approvals" not in row
+
+
+def test_malformed_and_distributor_urls_withheld():
+    from pipeline.models import RetrievalResult
+    clean = _clean()
+    ext = _ext([])
+    # empty-host URL must never reach the output
+    row = build_output_row(clean, None, RetrievalResult(mfr_url="https://"), ext)
+    assert "MFR URL" not in row
+    # flagged distributor evidence is withheld entirely
+    row2 = build_output_row(
+        clean, None,
+        RetrievalResult(mfr_url="https://parksite.com", flags=["SUPPLIER_DOMAIN_EVIDENCE", "NEEDS_REVIEW"]),
+        ext,
+    )
+    assert "MFR URL" not in row2
+    assert "Ref URL 1" not in row2
+    # valid maker URL still flows through
+    row3 = build_output_row(clean, None, RetrievalResult(mfr_url="https://azekexteriors.com/en/p/x"), ext)
+    assert row3["MFR URL"] == "https://azekexteriors.com/en/p/x"

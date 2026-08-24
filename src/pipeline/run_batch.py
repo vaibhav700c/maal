@@ -323,11 +323,21 @@ def build_output_row(
         "MARKETING_DESCRIPTION": build_retail_desc(view),
     }
     if retrieval:
-        out["MFR URL"] = (
-            retrieval.product_url or retrieval.mfr_url or ""
-        )
-        for i, url in enumerate(retrieval.ref_urls[:5], start=1):
-            out[f"Ref URL {i}"] = url
+        def _valid_url(u: str | None) -> bool:
+            if not u or not u.startswith("http"):
+                return False
+            host = u.split("/")[2] if "://" in u else ""
+            return "." in host and len(host) > 4
+
+        # a distributor URL is not manufacturer provenance; withhold it
+        supplier_evidence = "SUPPLIER_DOMAIN_EVIDENCE" in (retrieval.flags or [])
+        mfr_candidate = retrieval.product_url or retrieval.mfr_url or ""
+        if mfr_candidate and not supplier_evidence and _valid_url(mfr_candidate):
+            out["MFR URL"] = mfr_candidate
+        if not supplier_evidence:
+            valid_refs = [u for u in retrieval.ref_urls[:5] if _valid_url(u)]
+            for i, url in enumerate(valid_refs, start=1):
+                out[f"Ref URL {i}"] = url
 
     # Unilog asset conventions: named images + specification sheet follow the
     # BRAND_MPN pattern once the maker's own page for this part is confirmed.
