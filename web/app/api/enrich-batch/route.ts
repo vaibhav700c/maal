@@ -26,20 +26,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No rows provided." }, { status: 400 });
   }
 
-  // Call the Render backend for each row sequentially (free tier RPM limits)
-  const results: any[] = [];
-  for (const p of products) {
-    try {
-      const res = await fetch(`${BACKEND.replace(/\/$/, "")}/enrich/single`, {
+  // Call the Render backend concurrently — sequential loops blow past the
+  // 60s Hobby function cap once rows take ~30s each.
+  const settled = await Promise.allSettled(
+    products.map((p) =>
+      fetch(`${BACKEND.replace(/\/$/, "")}/enrich/single`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(p),
-      });
-      const d = await res.json().catch(() => null);
-      if (d?.rows?.[0]) results.push(d.rows[0]);
-    } catch {
-      /* skip failed row */
-    }
-  }
+      }).then((res) => res.json().catch(() => null))
+    )
+  );
+  const results: any[] = settled
+    .filter(
+      (s): s is PromiseFulfilledResult<any> =>
+        s.status === "fulfilled" && !!s.value?.rows?.[0]
+    )
+    .map((s) => s.value.rows[0]);
   return NextResponse.json({ ok: true, count: results.length, rows: results });
 }

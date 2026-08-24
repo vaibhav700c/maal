@@ -526,21 +526,25 @@ async def enrich_batch_file(file: bytes = File(...)) -> dict:
     if not rows_in:
         raise HTTPException(status_code=422, detail="No usable rows found")
 
-    out_rows, out_echoes = [], []
-    for p in rows_in:
+    async def _safe_enrich(p: Product):
         try:
-            record, echo = await enrich_product(p)
-            out_rows.append(record)
-            out_echoes.append(echo)
+            return await enrich_product(p)
         except Exception as exc:
-            out_rows.append({
+            record = {
                 "mpn": p.mpn, "shortDesc": "", "longDesc": "", "classpath": "",
                 "unspsc": "", "brand": "", "manufacturer": "",
                 "invoiceDesc": "", "mobileDesc": "", "retailDesc": "",
                 "flags": ["NEEDS_REVIEW", f"PIPELINE_ERROR:{type(exc).__name__}"],
                 "triage": 1.0, "physics": None, "retrieval": None, "assets": {},
                 "attributes": [],
-            })
-            out_echoes.append({"mpn": p.mpn, "description": p.description,
-                               "brandRaw": p.brand or "", "supplierRaw": p.supplier or ""})
+            }
+            echo = {"mpn": p.mpn, "description": p.description,
+                    "brandRaw": p.brand or "", "supplierRaw": p.supplier or ""}
+            return record, echo
+
+    # concurrent — sequential loops blow past caller timeouts (Vercel 60s cap)
+    out_rows, out_echoes = [], []
+    for record, echo in await asyncio.gather(*(_safe_enrich(p) for p in rows_in)):
+        out_rows.append(record)
+        out_echoes.append(echo)
     return {"ok": True, "rows": out_rows, "echoes": out_echoes, "count": len(out_rows)}
